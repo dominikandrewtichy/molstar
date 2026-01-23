@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mol* WebGPU Test</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        h1 {
+            margin-bottom: 10px;
+            color: #4fc3f7;
+        }
+        .status {
+            margin-bottom: 20px;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .status.success {
+            background: #2e7d32;
+        }
+        .status.error {
+            background: #c62828;
+        }
+        .status.warning {
+            background: #f57c00;
+        }
+        #canvas {
+            border: 2px solid #4fc3f7;
+            border-radius: 8px;
+            background: #000;
+        }
+        .info {
+            margin-top: 20px;
+            padding: 15px;
+            background: #16213e;
+            border-radius: 8px;
+            max-width: 800px;
+            width: 100%;
+        }
+        .info h3 {
+            color: #4fc3f7;
+            margin-bottom: 10px;
+        }
+        .info pre {
+            background: #0f0f23;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            background: #4fc3f7;
+            color: #1a1a2e;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: #81d4fa;
+        }
+        button:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <h1>Mol* WebGPU Test</h1>
+    <div id="status" class="status">Checking WebGPU support...</div>
+    <canvas id="canvas" width="800" height="600"></canvas>
+
+    <div class="controls">
+        <button id="rotateBtn" disabled>Toggle Rotation</button>
+        <button id="colorBtn" disabled>Change Color</button>
+    </div>
+
+    <div class="info">
+        <h3>Device Information</h3>
+        <pre id="deviceInfo">Loading...</pre>
+    </div>
+
+    <div class="info">
+        <h3>Render Stats</h3>
+        <pre id="renderStats">Waiting for render...</pre>
+    </div>
+
+    <script type="module">
+        // Simple WebGPU test - renders a rotating triangle
+
+        const canvas = document.getElementById('canvas');
+        const statusEl = document.getElementById('status');
+        const deviceInfoEl = document.getElementById('deviceInfo');
+        const renderStatsEl = document.getElementById('renderStats');
+        const rotateBtn = document.getElementById('rotateBtn');
+        const colorBtn = document.getElementById('colorBtn');
+
+        let rotating = true;
+        let colorIndex = 0;
+        const colors = [
+            [0.3, 0.6, 1.0],  // Blue
+            [1.0, 0.4, 0.4],  // Red
+            [0.4, 1.0, 0.4],  // Green
+            [1.0, 0.8, 0.2],  // Yellow
+            [0.8, 0.4, 1.0],  // Purple
+        ];
+
+        // WGSL Shaders
+        const vertexShader = /* wgsl */`
+            struct Uniforms {
+                mvp: mat4x4<f32>,
+                color: vec4<f32>,
+                time: f32,
+                _padding: vec3<f32>,
+            }
+
+            @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+
+            struct VertexInput {
+                @location(0) position: vec3<f32>,
+                @location(1) normal: vec3<f32>,
+            }
+
+            struct VertexOutput {
+                @builtin(position) position: vec4<f32>,
+                @location(0) normal: vec3<f32>,
+                @location(1) worldPos: vec3<f32>,
+            }
+
+            @vertex
+            fn main(input: VertexInput) -> VertexOutput {
+                var output: VertexOutput;
+                output.position = uniforms.mvp * vec4<f32>(input.position, 1.0);
+                output.normal = input.normal;
+                output.worldPos = input.position;
+                return output;
+            }
+        `;
+
+        const fragmentShader = /* wgsl */`
+            struct Uniforms {
+                mvp: mat4x4<f32>,
+                color: vec4<f32>,
+                time: f32,
+                _padding: vec3<f32>,
+            }
+
+            @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+
+            struct FragmentInput {
+                @location(0) normal: vec3<f32>,
+                @location(1) worldPos: vec3<f32>,
+            }
+
+            @fragment
+            fn main(input: FragmentInput) -> @location(0) vec4<f32> {
+                // Simple lighting
+                let lightDir = normalize(vec3<f32>(1.0, 1.0, 1.0));
+                let normal = normalize(input.normal);
+                let diffuse = max(dot(normal, lightDir), 0.0);
+                let ambient = 0.3;
+                let lighting = ambient + diffuse * 0.7;
+
+                return vec4<f32>(uniforms.color.rgb * lighting, 1.0);
+            }
+        `;
+
+        // Geometry: A simple icosahedron (20-sided polyhedron)
+        function createIcosahedron() {
+            const t = (1.0 + Math.sqrt(5.0)) / 2.0;
+
+            const vertices = [
+                [-1,  t,  0], [ 1,  t,  0], [-1, -t,  0], [ 1, -t,  0],
+                [ 0, -1,  t], [ 0,  1,  t], [ 0, -1, -t], [ 0,  1, -t],
+                [ t,  0, -1], [ t,  0,  1], [-t,  0, -1], [-t,  0,  1],
+            ];
+
+            const indices = [
+                0, 11, 5,   0, 5, 1,    0, 1, 7,    0, 7, 10,   0, 10, 11,
+                1, 5, 9,    5, 11, 4,   11, 10, 2,  10, 7, 6,   7, 1, 8,
+                3, 9, 4,    3, 4, 2,    3, 2, 6,    3, 6, 8,    3, 8, 9,
+                4, 9, 5,    2, 4, 11,   6, 2, 10,   8, 6, 7,    9, 8, 1,
+            ];
+
+            // Normalize vertices and compute normals
+            const positions = [];
+            const normals = [];
+
+            for (let i = 0; i < indices.length; i += 3) {
+                const v0 = vertices[indices[i]];
+                const v1 = vertices[indices[i + 1]];
+                const v2 = vertices[indices[i + 2]];
+
+                // Normalize each vertex to create a sphere
+                for (const v of [v0, v1, v2]) {
+                    const len = Math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+                    const nx = v[0] / len;
+                    const ny = v[1] / len;
+                    const nz = v[2] / len;
+
+                    positions.push(nx * 0.8, ny * 0.8, nz * 0.8);
+                    normals.push(nx, ny, nz);
+                }
+            }
+
+            return {
+                positions: new Float32Array(positions),
+                normals: new Float32Array(normals),
+                vertexCount: positions.length / 3,
+            };
+        }
+
+        // Matrix utilities
+        function mat4Perspective(fov, aspect, near, far) {
+            const f = 1.0 / Math.tan(fov / 2);
+            const nf = 1 / (near - far);
+            return new Float32Array([
+                f / aspect, 0, 0, 0,
+                0, f, 0, 0,
+                0, 0, (far + near) * nf, -1,
+                0, 0, 2 * far * near * nf, 0,
+            ]);
+        }
+
+        function mat4RotateY(angle) {
+            const c = Math.cos(angle);
+            const s = Math.sin(angle);
+            return new Float32Array([
+                c, 0, s, 0,
+                0, 1, 0, 0,
+                -s, 0, c, 0,
+                0, 0, 0, 1,
+            ]);
+        }
+
+        function mat4RotateX(angle) {
+            const c = Math.cos(angle);
+            const s = Math.sin(angle);
+            return new Float32Array([
+                1, 0, 0, 0,
+                0, c, -s, 0,
+                0, s, c, 0,
+                0, 0, 0, 1,
+            ]);
+        }
+
+        function mat4Translate(x, y, z) {
+            return new Float32Array([
+                1, 0, 0, 0,
+                0, 1, 0, 0,
+                0, 0, 1, 0,
+                x, y, z, 1,
+            ]);
+        }
+
+        function mat4Multiply(a, b) {
+            const result = new Float32Array(16);
+            for (let i = 0; i < 4; i++) {
+                for (let j = 0; j < 4; j++) {
+                    result[i * 4 + j] =
+                        a[i * 4 + 0] * b[0 * 4 + j] +
+                        a[i * 4 + 1] * b[1 * 4 + j] +
+                        a[i * 4 + 2] * b[2 * 4 + j] +
+                        a[i * 4 + 3] * b[3 * 4 + j];
+                }
+            }
+            return result;
+        }
+
+        async function init() {
+            // Check WebGPU support
+            if (!navigator.gpu) {
+                statusEl.textContent = 'WebGPU is not supported in this browser';
+                statusEl.className = 'status error';
+                deviceInfoEl.textContent = 'WebGPU not available.\n\nTry:\n- Chrome 113+\n- Edge 113+\n- Firefox with dom.webgpu.enabled flag';
+                return;
+            }
+
+            statusEl.textContent = 'Requesting GPU adapter...';
+
+            // Request adapter
+            const adapter = await navigator.gpu.requestAdapter();
+            if (!adapter) {
+                statusEl.textContent = 'Failed to get GPU adapter';
+                statusEl.className = 'status error';
+                return;
+            }
+
+            // Request device
+            const device = await adapter.requestDevice();
+
+            // Get device info
+            const adapterInfo = await adapter.info;
+            deviceInfoEl.textContent = JSON.stringify({
+                vendor: adapterInfo.vendor || 'Unknown',
+                architecture: adapterInfo.architecture || 'Unknown',
+                device: adapterInfo.device || 'Unknown',
+                description: adapterInfo.description || 'Unknown',
+                maxTextureDimension2D: device.limits.maxTextureDimension2D,
+                maxBufferSize: device.limits.maxBufferSize,
+                maxBindGroups: device.limits.maxBindGroups,
+            }, null, 2);
+
+            // Configure canvas
+            const context = canvas.getContext('webgpu');
+            const format = navigator.gpu.getPreferredCanvasFormat();
+            context.configure({
+                device,
+                format,
+                alphaMode: 'premultiplied',
+            });
+
+            // Create geometry
+            const geometry = createIcosahedron();
+
+            // Create buffers
+            const positionBuffer = device.createBuffer({
+                size: geometry.positions.byteLength,
+                usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+            });
+            device.queue.writeBuffer(positionBuffer, 0, geometry.positions);
+
+            const normalBuffer = device.createBuffer({
+                size: geometry.normals.byteLength,
+                usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+            });
+            device.queue.writeBuffer(normalBuffer, 0, geometry.normals);
+
+            // Create uniform buffer (mat4 + vec4 + float + padding = 64 + 16 + 4 + 12 = 96 bytes, aligned to 256)
+            const uniformBufferSize = 256;
+            const uniformBuffer = device.createBuffer({
+                size: uniformBufferSize,
+                usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+            });
+
+            // Create depth texture
+            const depthTexture = device.createTexture({
+                size: [canvas.width, canvas.height],
+                format: 'depth24plus',
+                usage: GPUTextureUsage.RENDER_ATTACHMENT,
+            });
+
+            // Create shader modules
+            const vertexModule = device.createShaderModule({ code: vertexShader });
+            const fragmentModule = device.createShaderModule({ code: fragmentShader });
+
+            // Create pipeline
+            const pipeline = device.createRenderPipeline({
+                layout: 'auto',
+                vertex: {
+                    module: vertexModule,
+                    entryPoint: 'main',
+                    buffers: [
+                        {
+                            arrayStride: 12,
+                            attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }],
+                        },
+                        {
+                            arrayStride: 12,
+                            attributes: [{ shaderLocation: 1, offset: 0, format: 'float32x3' }],
+                        },
+                    ],
+                },
+                fragment: {
+                    module: fragmentModule,
+                    entryPoint: 'main',
+                    targets: [{ format }],
+                },
+                primitive: {
+                    topology: 'triangle-list',
+                    cullMode: 'back',
+                },
+                depthStencil: {
+                    format: 'depth24plus',
+                    depthWriteEnabled: true,
+                    depthCompare: 'less',
+                },
+            });
+
+            // Create bind group
+            const bindGroup = device.createBindGroup({
+                layout: pipeline.getBindGroupLayout(0),
+                entries: [
+                    { binding: 0, resource: { buffer: uniformBuffer } },
+                ],
+            });
+
+            statusEl.textContent = 'WebGPU initialized successfully!';
+            statusEl.className = 'status success';
+
+            // Enable controls
+            rotateBtn.disabled = false;
+            colorBtn.disabled = false;
+
+            rotateBtn.addEventListener('click', () => {
+                rotating = !rotating;
+                rotateBtn.textContent = rotating ? 'Stop Rotation' : 'Start Rotation';
+            });
+
+            colorBtn.addEventListener('click', () => {
+                colorIndex = (colorIndex + 1) % colors.length;
+            });
+
+            // Render loop
+            let frameCount = 0;
+            let lastTime = performance.now();
+            let fps = 0;
+
+            function render(time) {
+                frameCount++;
+                const now = performance.now();
+                if (now - lastTime >= 1000) {
+                    fps = frameCount;
+                    frameCount = 0;
+                    lastTime = now;
+                }
+
+                const angle = rotating ? time * 0.001 : 0;
+
+                // Create MVP matrix
+                const projection = mat4Perspective(Math.PI / 4, canvas.width / canvas.height, 0.1, 100);
+                const view = mat4Translate(0, 0, -3);
+                const modelY = mat4RotateY(angle);
+                const modelX = mat4RotateX(angle * 0.5);
+                const model = mat4Multiply(modelY, modelX);
+                const mvp = mat4Multiply(mat4Multiply(projection, view), model);
+
+                // Update uniforms
+                const uniformData = new ArrayBuffer(uniformBufferSize);
+                const uniformView = new Float32Array(uniformData);
+                uniformView.set(mvp, 0);  // MVP matrix at offset 0
+                uniformView.set([...colors[colorIndex], 1.0], 16);  // Color at offset 64 bytes = 16 floats
+                uniformView[20] = time * 0.001;  // Time at offset 80 bytes = 20 floats
+                device.queue.writeBuffer(uniformBuffer, 0, uniformData);
+
+                // Create command encoder
+                const commandEncoder = device.createCommandEncoder();
+
+                // Begin render pass
+                const renderPass = commandEncoder.beginRenderPass({
+                    colorAttachments: [{
+                        view: context.getCurrentTexture().createView(),
+                        clearValue: { r: 0.1, g: 0.1, b: 0.15, a: 1.0 },
+                        loadOp: 'clear',
+                        storeOp: 'store',
+                    }],
+                    depthStencilAttachment: {
+                        view: depthTexture.createView(),
+                        depthClearValue: 1.0,
+                        depthLoadOp: 'clear',
+                        depthStoreOp: 'store',
+                    },
+                });
+
+                renderPass.setPipeline(pipeline);
+                renderPass.setBindGroup(0, bindGroup);
+                renderPass.setVertexBuffer(0, positionBuffer);
+                renderPass.setVertexBuffer(1, normalBuffer);
+                renderPass.draw(geometry.vertexCount);
+                renderPass.end();
+
+                // Submit commands
+                device.queue.submit([commandEncoder.finish()]);
+
+                // Update stats
+                renderStatsEl.textContent = `FPS: ${fps}\nVertices: ${geometry.vertexCount}\nTriangles: ${geometry.vertexCount / 3}\nColor: ${colors[colorIndex].map(c => c.toFixed(1)).join(', ')}\nRotating: ${rotating}`;
+
+                requestAnimationFrame(render);
+            }
+
+            requestAnimationFrame(render);
+        }
+
+        init().catch(err => {
+            statusEl.textContent = `Error: ${err.message}`;
+            statusEl.className = 'status error';
+            console.error(err);
+        });
+    </script>
+</body>
+</html>
