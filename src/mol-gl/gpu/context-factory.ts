@@ -6,6 +6,7 @@
 
 import { GPUContext, GPUContextDescriptor, GPUBackend, isWebGPUSupported, getBestAvailableBackend } from './context';
 import { createWebGPUContext, WebGPUContextOptions } from '../webgpu/context';
+import { createWebGLAdapterContext, WebGLAdapterContextOptions } from '../webgl/context-adapter';
 
 /**
  * Options for creating a GPU context.
@@ -14,7 +15,7 @@ export interface CreateContextOptions {
     /** WebGPU-specific options */
     webgpu?: WebGPUContextOptions;
     /** WebGL-specific context attributes */
-    webgl?: WebGLContextAttributes & { preferWebGl1?: boolean };
+    webgl?: WebGLAdapterContextOptions;
 }
 
 /**
@@ -58,13 +59,28 @@ export async function createGPUContext(
         }
     }
 
-    // Fall back to WebGL
-    // Note: WebGL context creation would go here when the WebGL adapter is implemented
-    // For now, throw an error since we're focusing on WebGPU first
-    throw new Error(
-        'WebGL backend not yet implemented in the new GPU abstraction layer. ' +
-        'Use the existing WebGL context (mol-gl/webgl/context.ts) for WebGL support.'
-    );
+    // Create WebGL context (either as primary choice or fallback)
+    try {
+        const context = createWebGLAdapterContext(descriptor, options?.webgl);
+        return { context, backend: 'webgl', fallbackUsed };
+    } catch (error) {
+        throw new Error(`Failed to create GPU context: ${error}`);
+    }
+}
+
+/**
+ * Create a WebGL context synchronously (when you specifically need WebGL).
+ * Use this when you don't need async initialization and want direct WebGL access.
+ *
+ * @param descriptor Context descriptor including canvas and preferences
+ * @param options WebGL-specific options
+ * @returns The created WebGL context
+ */
+export function createWebGLContext(
+    descriptor: GPUContextDescriptor,
+    options?: WebGLAdapterContextOptions
+): GPUContext {
+    return createWebGLAdapterContext(descriptor, options);
 }
 
 /**

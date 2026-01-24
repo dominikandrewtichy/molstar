@@ -77,12 +77,15 @@ src/mol-gl/
 ├── gpu/                           # NEW: Abstract GPU interface
 │   ├── index.ts
 │   ├── context.ts                 # GPUContext interface
-│   ├── context-factory.ts         # Backend selection factory
+│   ├── context-factory.ts         # Backend selection factory (updated with WebGL support)
 │   ├── buffer.ts                  # Buffer interface
 │   ├── texture.ts                 # Texture/Sampler interfaces
 │   ├── bind-group.ts              # BindGroup/Layout interfaces
 │   ├── pipeline.ts                # Pipeline interfaces
 │   └── render-pass.ts             # CommandEncoder interfaces
+├── webgl/
+│   ├── ...                        # Existing WebGL files
+│   └── context-adapter.ts         # NEW: WebGL adapter implementing GPUContext (~1600 lines)
 ├── webgpu/                        # NEW: WebGPU implementation
 │   ├── index.ts
 │   ├── context.ts                 # Full WebGPU context (~1050 lines)
@@ -201,7 +204,7 @@ All renderables for Phase 4 have been ported:
 - [ ] Compute shader ports (histogram pyramid, marching cubes)
 
 #### Phase 6: Integration
-- [ ] Create WebGL adapter implementing `GPUContext` interface
+- [x] Create WebGL adapter implementing `GPUContext` interface (`webgl/context-adapter.ts`)
 - [ ] Integrate with `mol-canvas3d`
 - [ ] Add backend toggle to viewer settings
 - [x] WebGPU test examples (`src/examples/webgpu-test/`) - Basic triangle + animated mesh cube
@@ -234,8 +237,10 @@ Test examples have been created in `src/examples/webgpu-test/`:
 |------|-------------|
 | `index.ts` | Basic WebGPU tests: context creation, shader module, buffer/texture creation, simple triangle render |
 | `mesh-test.ts` | Animated 3D cube with lighting, demonstrates full render pipeline |
+| `unified-test.ts` | Unified backend test: demonstrates both WebGL and WebGPU working through common GPUContext interface |
 | `index.html` | HTML page for running basic tests |
 | `mesh.html` | HTML page for running mesh animation test |
+| `unified.html` | HTML page for running unified backend tests |
 
 **To run the tests:**
 
@@ -257,13 +262,38 @@ Test examples have been created in `src/examples/webgpu-test/`:
 | 3. Pipeline System | ✅ Complete | 100% |
 | 4. Renderables | ✅ Complete | 100% |
 | 5. Advanced Features | ✅ Complete | ~95% |
-| 6. Integration | 🟡 Started | ~10% |
+| 6. Integration | 🟡 In Progress | ~30% |
 
-**Overall Progress:** ~85%
+**Overall Progress:** ~88%
 
 **Remaining Critical Work:**
 1. Canvas3D integration with async context creation
-2. WebGL adapter for GPUContext interface
+2. ~~WebGL adapter for GPUContext interface~~ ✅ Implemented
 3. Compute shader ports (histogram pyramid, marching cubes)
 4. Visual regression tests
 5. Performance benchmarks
+
+### 13.9 WebGL Adapter Implementation
+
+The WebGL adapter (`src/mol-gl/webgl/context-adapter.ts`) provides a bridge between the abstract `GPUContext` interface and WebGL:
+
+| Component | Status | Description |
+|-----------|--------|-------------|
+| `WebGLAdapterContext` | ✅ | Main context implementing `GPUContext` interface |
+| `WebGLAdapterBuffer` | ✅ | Buffer wrapper with read/write support |
+| `WebGLAdapterTexture` | ✅ | Texture wrapper with format conversion |
+| `WebGLAdapterTextureView` | ✅ | Texture view wrapper |
+| `WebGLAdapterSampler` | ✅ | WebGL2 sampler support |
+| `WebGLAdapterBindGroup` | ✅ | Bind group emulation |
+| `WebGLAdapterPipelineLayout` | ✅ | Pipeline layout wrapper |
+| `WebGLAdapterRenderPipeline` | ✅ | Program-based pipeline |
+| `WebGLAdapterCommandEncoder` | ✅ | Deferred command execution |
+| `WebGLAdapterRenderPassEncoder` | ✅ | Render pass state management |
+
+**Key Features:**
+- Automatic backend selection via `createGPUContext()` factory
+- Format conversion between abstract and WebGL formats
+- Deferred command execution matching WebGPU's command buffer model
+- Full support for vertex buffers, index buffers, and uniform buffers
+- Texture/sampler binding compatible with bind group abstraction
+- Blend, depth, stencil state management matching WebGPU patterns
