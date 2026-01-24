@@ -9,6 +9,7 @@
 
 import { createWebGPUContext } from '../../mol-gl/webgpu/context';
 import { GPUContext } from '../../mol-gl/gpu/context';
+import './index.html';
 
 // Simple triangle shader - standalone for testing
 const triangleShaderCode = /* wgsl */`

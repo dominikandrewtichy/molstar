@@ -7,6 +7,7 @@
  */
 
 import { createWebGPUContext } from '../../mol-gl/webgpu/context';
+import './index.html';
 
 // Simple mesh shader for the test
 const meshShaderCode = /* wgsl */`

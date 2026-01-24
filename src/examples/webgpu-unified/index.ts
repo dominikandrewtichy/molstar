@@ -9,6 +9,7 @@
 
 import { createGPUContext, getBackendSupportInfo, getBackendFeatures } from '../../mol-gl/gpu/context-factory';
 import { GPUContext, GPUBackend } from '../../mol-gl/gpu/context';
+import './index.html';
 
 interface TestResult {
     success: boolean;
