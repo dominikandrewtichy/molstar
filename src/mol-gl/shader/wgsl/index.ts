@@ -28,7 +28,7 @@ export * from './chunks/transparency.wgsl';
 // Shader chunks - Clipping
 export * from './chunks/clipping.wgsl';
 
-// Shaders
+// Shaders - Geometry
 export * from './mesh.wgsl';
 export * from './spheres.wgsl';
 export * from './cylinders.wgsl';
@@ -37,3 +37,10 @@ export * from './lines.wgsl';
 export * from './text.wgsl';
 export * from './image.wgsl';
 export * from './direct-volume.wgsl';
+
+// Shaders - Post-processing
+export * from './postprocessing.wgsl';
+export * from './ssao.wgsl';
+export * from './fxaa.wgsl';
+export * from './bloom.wgsl';
+export * from './outlines.wgsl';

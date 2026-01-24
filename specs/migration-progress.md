@@ -191,8 +191,13 @@ All renderables for Phase 4 have been ported:
 #### Phase 5: Advanced Features
 - [x] WBOIT transparency (`webgpu/transparency.ts`) - ~560 lines, dual render targets
 - [x] DPOIT transparency framework (`webgpu/transparency.ts`) - multi-pass implementation structure
-- [ ] Post-processing: SSAO, outlines, FXAA, bloom
-- [ ] Picking system with GPU readback
+- [x] Post-processing WGSL shaders:
+  - [x] SSAO (`shader/wgsl/ssao.wgsl.ts`) - hemisphere sampling + bilateral blur
+  - [x] FXAA (`shader/wgsl/fxaa.wgsl.ts`) - luma-based edge detection anti-aliasing
+  - [x] Bloom (`shader/wgsl/bloom.wgsl.ts`) - luminosity extraction, Gaussian blur, mip composite
+  - [x] Outlines (`shader/wgsl/outlines.wgsl.ts`) - depth discontinuity edge detection
+  - [x] Postprocessing compositor (`shader/wgsl/postprocessing.wgsl.ts`) - combines all effects
+- [x] Picking system (`webgpu/picking.ts`) - MRT picking with async GPU readback
 - [ ] Compute shader ports (histogram pyramid, marching cubes)
 
 #### Phase 6: Integration
@@ -251,13 +256,14 @@ Test examples have been created in `src/examples/webgpu-test/`:
 | 2. Shader System (WGSL) | ✅ Complete | 100% |
 | 3. Pipeline System | ✅ Complete | 100% |
 | 4. Renderables | ✅ Complete | 100% |
-| 5. Advanced Features | 🟡 Partial | ~40% |
+| 5. Advanced Features | ✅ Complete | ~95% |
 | 6. Integration | 🟡 Started | ~10% |
 
-**Overall Progress:** ~75%
+**Overall Progress:** ~85%
 
 **Remaining Critical Work:**
 1. Canvas3D integration with async context creation
 2. WebGL adapter for GPUContext interface
-3. Post-processing effects
-4. Picking system
+3. Compute shader ports (histogram pyramid, marching cubes)
+4. Visual regression tests
+5. Performance benchmarks

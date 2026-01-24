@@ -8,3 +8,12 @@ export * from './context';
 export * from './pipeline-cache';
 export * from './renderable';
 export * from './renderable/index';
+// Export transparency module selectively to avoid TransparencyMode conflict
+export { TransparencyPassManager } from './transparency';
+export type {
+    TransparencyPassConfig,
+    WboitTargets,
+    DpoitTargets,
+    TransparencyMode as TransparencyPassMode
+} from './transparency';
+export * from './picking';
