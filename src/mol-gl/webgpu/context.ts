@@ -536,20 +536,18 @@ class WebGPUContext implements GPUContext {
     getCurrentTexture(): Texture {
         const gpuTexture = this._gpuContext.getCurrentTexture();
 
-        // Create a wrapper if needed
-        if (!this._currentTexture || this._currentTexture.width !== gpuTexture.width || this._currentTexture.height !== gpuTexture.height) {
-            this._currentTexture = new WebGPUTexture(
-                this._device,
-                gpuTexture,
-                {
-                    size: [gpuTexture.width, gpuTexture.height, 1],
-                    format: 'rgba8unorm', // This is simplified; actual format comes from configuration
-                    usage: ['render-attachment'],
-                },
-                this.stats,
-                true // isSwapChainTexture
-            );
-        }
+        // Always create a new wrapper because the swap chain texture is invalid after the frame
+        this._currentTexture = new WebGPUTexture(
+            this._device,
+            gpuTexture,
+            {
+                size: [gpuTexture.width, gpuTexture.height, 1],
+                format: this._preferredFormat as import('../gpu/texture').TextureFormat,
+                usage: ['render-attachment'],
+            },
+            this.stats,
+            true // isSwapChainTexture
+        );
 
         return this._currentTexture;
     }
