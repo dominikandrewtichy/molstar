@@ -189,8 +189,8 @@ class WebGPUContext implements GPUContext {
         return this._adapter;
     }
 
-    get preferredFormat(): GPUTextureFormat {
-        return this._preferredFormat;
+    get preferredFormat(): import('../gpu/texture').TextureFormat {
+        return this._preferredFormat as import('../gpu/texture').TextureFormat;
     }
 
     setContextLost(): void {

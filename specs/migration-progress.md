@@ -189,8 +189,8 @@ All renderables for Phase 4 have been ported:
 - ✅ `DirectVolumeRenderable` (`webgpu/renderable/direct-volume.ts`) - ~550 lines, raymarching with transfer function
 
 #### Phase 5: Advanced Features
-- [ ] WBOIT transparency (dual render targets)
-- [ ] DPOIT transparency (multi-pass)
+- [x] WBOIT transparency (`webgpu/transparency.ts`) - ~560 lines, dual render targets
+- [x] DPOIT transparency framework (`webgpu/transparency.ts`) - multi-pass implementation structure
 - [ ] Post-processing: SSAO, outlines, FXAA, bloom
 - [ ] Picking system with GPU readback
 - [ ] Compute shader ports (histogram pyramid, marching cubes)
@@ -199,6 +199,7 @@ All renderables for Phase 4 have been ported:
 - [ ] Create WebGL adapter implementing `GPUContext` interface
 - [ ] Integrate with `mol-canvas3d`
 - [ ] Add backend toggle to viewer settings
+- [x] WebGPU test examples (`src/examples/webgpu-test/`) - Basic triangle + animated mesh cube
 - [ ] Visual regression tests
 - [ ] Performance benchmarks
 
@@ -219,3 +220,44 @@ All renderables for Phase 4 have been ported:
 6. **Instance Data**: Currently using storage buffers for instance transforms. This allows unlimited instances without attribute divisor limits.
 
 7. **Pipeline Cache**: The `PipelineCache` class handles the permutation explosion. Register pipeline creators per shader, and the cache handles variant creation.
+
+### 13.7 Testing the WebGPU Backend
+
+Test examples have been created in `src/examples/webgpu-test/`:
+
+| File | Description |
+|------|-------------|
+| `index.ts` | Basic WebGPU tests: context creation, shader module, buffer/texture creation, simple triangle render |
+| `mesh-test.ts` | Animated 3D cube with lighting, demonstrates full render pipeline |
+| `index.html` | HTML page for running basic tests |
+| `mesh.html` | HTML page for running mesh animation test |
+
+**To run the tests:**
+
+1. Start the development server: `npm run dev`
+2. Navigate to:
+   - `http://localhost:5173/examples/webgpu-test/` - Basic tests
+   - `http://localhost:5173/examples/webgpu-test/mesh.html` - Mesh animation
+
+**Requirements:**
+- Chrome 113+ or Firefox with WebGPU enabled
+- Hardware that supports WebGPU
+
+### 13.8 Current Status Summary
+
+| Phase | Status | Completion |
+|-------|--------|------------|
+| 1. Foundation (GPU Abstraction) | ✅ Complete | 100% |
+| 2. Shader System (WGSL) | ✅ Complete | 100% |
+| 3. Pipeline System | ✅ Complete | 100% |
+| 4. Renderables | ✅ Complete | 100% |
+| 5. Advanced Features | 🟡 Partial | ~40% |
+| 6. Integration | 🟡 Started | ~10% |
+
+**Overall Progress:** ~75%
+
+**Remaining Critical Work:**
+1. Canvas3D integration with async context creation
+2. WebGL adapter for GPUContext interface
+3. Post-processing effects
+4. Picking system

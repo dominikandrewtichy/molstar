@@ -7,7 +7,7 @@
 import { Subject } from 'rxjs';
 import { now } from '../../mol-util/now';
 import { Buffer, BufferDescriptor } from './buffer';
-import { Texture, TextureDescriptor, TextureView, TextureViewDescriptor, Sampler, SamplerDescriptor } from './texture';
+import { Texture, TextureDescriptor, TextureView, TextureViewDescriptor, Sampler, SamplerDescriptor, TextureFormat } from './texture';
 import { BindGroup, BindGroupDescriptor, BindGroupLayout, BindGroupLayoutDescriptor, PipelineLayout, PipelineLayoutDescriptor } from './bind-group';
 import { RenderPipeline, RenderPipelineDescriptor, ComputePipeline, ComputePipelineDescriptor, ShaderModule, ShaderModuleDescriptor } from './pipeline';
 import { CommandEncoder, CommandBuffer, RenderPassDescriptor, RenderPassEncoder, ComputePassEncoder } from './render-pass';
@@ -61,6 +61,8 @@ export interface GPUContext {
     readonly pixelRatio: number;
     readonly limits: GPULimits;
     readonly stats: GPUStats;
+    /** Preferred texture format for the canvas */
+    readonly preferredFormat: TextureFormat;
 
     // Resource creation
     createBuffer(descriptor: BufferDescriptor): Buffer;

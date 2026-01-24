@@ -33,9 +33,12 @@ export type TextureFormat =
     | 'rg16sint'
     | 'rg16float'
     | 'rgba8unorm'
+    | 'rgba8unorm-srgb'
     | 'rgba8snorm'
     | 'rgba8uint'
     | 'rgba8sint'
+    | 'bgra8unorm'
+    | 'bgra8unorm-srgb'
     // 64-bit formats
     | 'rg32uint'
     | 'rg32sint'
@@ -289,9 +292,12 @@ export function getBytesPerPixel(format: TextureFormat): number {
         case 'rg16sint':
         case 'rg16float':
         case 'rgba8unorm':
+        case 'rgba8unorm-srgb':
         case 'rgba8snorm':
         case 'rgba8uint':
         case 'rgba8sint':
+        case 'bgra8unorm':
+        case 'bgra8unorm-srgb':
         case 'depth24plus':
         case 'depth32float':
             return 4;
