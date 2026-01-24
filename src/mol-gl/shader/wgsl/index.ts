@@ -35,3 +35,5 @@ export * from './cylinders.wgsl';
 export * from './points.wgsl';
 export * from './lines.wgsl';
 export * from './text.wgsl';
+export * from './image.wgsl';
+export * from './direct-volume.wgsl';

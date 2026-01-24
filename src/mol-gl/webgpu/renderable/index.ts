@@ -5,3 +5,10 @@
  */
 
 export * from './mesh';
+export * from './spheres';
+export * from './cylinders';
+export * from './points';
+export * from './lines';
+export * from './text';
+export * from './image';
+export * from './direct-volume';

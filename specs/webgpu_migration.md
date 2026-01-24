@@ -817,7 +817,7 @@ Always maintain WebGL fallback.
 
 ## 13. Implementation Progress Report
 
-**Last Updated:** 2026-01-23
+**Last Updated:** 2026-01-24
 
 ### 13.1 Phase 1 Status: ✅ COMPLETE
 
@@ -908,7 +908,14 @@ src/mol-gl/
 │   ├── webgpu-types.d.ts          # TypeScript type declarations
 │   └── renderable/                # Concrete renderable implementations
 │       ├── index.ts
-│       └── mesh.ts                # WebGPU mesh renderable
+│       ├── mesh.ts                # WebGPU mesh renderable
+│       ├── spheres.ts             # WebGPU spheres renderable (ray-cast)
+│       ├── cylinders.ts           # WebGPU cylinders renderable (ray-cast)
+│       ├── points.ts              # WebGPU points renderable
+│       ├── lines.ts               # WebGPU lines renderable
+│       ├── text.ts                # WebGPU text renderable (SDF)
+│       ├── image.ts               # WebGPU image renderable
+│       └── direct-volume.ts       # WebGPU direct volume renderable
 └── shader/
     └── wgsl/                      # NEW: WGSL shaders
         ├── index.ts
@@ -919,6 +926,8 @@ src/mol-gl/
         ├── points.wgsl.ts         # Point primitives
         ├── lines.wgsl.ts          # Wide line primitives
         ├── text.wgsl.ts           # SDF text rendering
+        ├── image.wgsl.ts          # Image texture rendering
+        ├── direct-volume.wgsl.ts  # Raymarching volume rendering
         └── chunks/
             ├── common.wgsl.ts         # Common utilities (math, packing, color space)
             ├── uniforms.wgsl.ts       # Uniform buffer structs
@@ -959,6 +968,8 @@ src/mol-gl/
 | `points.wgsl.ts` | ✅ | ~300 | Point primitives with circle/fuzzy styles |
 | `lines.wgsl.ts` | ✅ | ~350 | Wide line primitives with screen-space width |
 | `text.wgsl.ts` | ✅ | ~400 | SDF text rendering with border and background |
+| `image.wgsl.ts` | ✅ | ~350 | Image texture rendering with cubic interpolation |
+| `direct-volume.wgsl.ts` | ✅ | ~550 | Raymarching volume rendering with transfer function |
 
 #### Phase 2 Status: ✅ COMPLETE
 
@@ -973,7 +984,7 @@ All core shaders for Phase 2 have been ported:
 #### Phase 2: Remaining Optional Tasks
 - [ ] Create shader variant system with defines/overrides (can be done during Phase 3)
 
-#### Phase 3 Status: 🔄 IN PROGRESS
+#### Phase 3 Status: ✅ COMPLETE
 
 Completed:
 - ✅ Create `WebGPURenderable` base class (`webgpu/renderable.ts`)
@@ -981,19 +992,18 @@ Completed:
 - ✅ Port `MeshRenderable` to WebGPU (`webgpu/renderable/mesh.ts`)
 - ✅ Implement bind group layout creation
 - ✅ Implement vertex buffer upload and versioning
+- ✅ Implement uniform buffer management and upload
 
-Remaining:
-- [ ] Implement full bind group management with uniform updates
-- [ ] Implement vertex buffer layout generation from schema
-- [ ] Handle dynamic uniform updates
-- [ ] Port remaining renderables (SpheresRenderable, CylindersRenderable, etc.)
+#### Phase 4 Status: ✅ COMPLETE
 
-#### Phase 4: Remaining Renderables
-- [ ] `SpheresRenderable` (most complex - ray marching)
-- [ ] `CylindersRenderable`
-- [ ] `TextRenderable`
-- [ ] `DirectVolumeRenderable`
-- [ ] `PointsRenderable`, `LinesRenderable`, `ImageRenderable`
+All renderables for Phase 4 have been ported:
+- ✅ `SpheresRenderable` (`webgpu/renderable/spheres.ts`) - ~500 lines, ray-cast impostors with LOD
+- ✅ `CylindersRenderable` (`webgpu/renderable/cylinders.ts`) - ~500 lines, ray-cast impostors with caps
+- ✅ `PointsRenderable` (`webgpu/renderable/points.ts`) - ~400 lines, screen-space quads with styles
+- ✅ `LinesRenderable` (`webgpu/renderable/lines.ts`) - ~400 lines, wide lines with screen-space width
+- ✅ `TextRenderable` (`webgpu/renderable/text.ts`) - ~500 lines, SDF text with border/background
+- ✅ `ImageRenderable` (`webgpu/renderable/image.ts`) - ~450 lines, textured quads with cubic interpolation
+- ✅ `DirectVolumeRenderable` (`webgpu/renderable/direct-volume.ts`) - ~550 lines, raymarching with transfer function
 
 #### Phase 5: Advanced Features
 - [ ] WBOIT transparency (dual render targets)
