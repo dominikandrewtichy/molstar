@@ -205,7 +205,16 @@ All renderables for Phase 4 have been ported:
 
 #### Phase 6: Integration
 - [x] Create WebGL adapter implementing `GPUContext` interface (`webgl/context-adapter.ts`)
-- [ ] Integrate with `mol-canvas3d`
+- [x] Extend GPUContext interface for Canvas3D integration
+- [x] Add render target abstraction (`RenderTarget` interface)
+- [x] Add named resource caches to GPUContext
+- [x] Add utility methods (`clear()`, `checkError()`, `bindDrawingBuffer()`)
+- [x] Add synchronization methods (fence sync support)
+- [x] Update WebGPU context with new interface members
+- [x] Canvas3D compatibility layer (`context-compat.ts`) with async context creation
+- [x] WebGLBackedGPUContext interface for backward compatibility
+- [ ] Update Renderer to use GPUContext
+- [ ] Update Passes to use GPUContext
 - [ ] Add backend toggle to viewer settings
 - [x] WebGPU test examples (`src/examples/webgpu-test/`) - Basic triangle + animated mesh cube
 - [ ] Visual regression tests
@@ -262,16 +271,24 @@ Test examples have been created in `src/examples/webgpu-test/`:
 | 3. Pipeline System | ✅ Complete | 100% |
 | 4. Renderables | ✅ Complete | 100% |
 | 5. Advanced Features | ✅ Complete | ~95% |
-| 6. Integration | 🟡 In Progress | ~30% |
+| 6. Integration | 🟡 In Progress | ~60% |
 
-**Overall Progress:** ~88%
+**Overall Progress:** ~93%
+
+**Completed Work:**
+- ✅ WebGL adapter for GPUContext interface
+- ✅ WebGPU context implementation
+- ✅ GPUContext interface extensions for Canvas3D (render targets, caches, utilities)
+- ✅ Render target abstraction (RenderTarget interface)
+- ✅ Test examples demonstrating both backends
 
 **Remaining Critical Work:**
-1. Canvas3D integration with async context creation
-2. ~~WebGL adapter for GPUContext interface~~ ✅ Implemented
-3. Compute shader ports (histogram pyramid, marching cubes)
-4. Visual regression tests
-5. Performance benchmarks
+1. ✅ Canvas3D integration with async context creation (added `context-compat.ts` compatibility layer)
+2. Update Renderer to use GPUContext instead of WebGLContext
+3. Update all rendering Passes to use GPUContext
+4. Compute shader ports (histogram pyramid, marching cubes)
+5. Visual regression tests
+6. Performance benchmarks
 
 ### 13.9 WebGL Adapter Implementation
 
@@ -289,6 +306,8 @@ The WebGL adapter (`src/mol-gl/webgl/context-adapter.ts`) provides a bridge betw
 | `WebGLAdapterRenderPipeline` | ✅ | Program-based pipeline |
 | `WebGLAdapterCommandEncoder` | ✅ | Deferred command execution |
 | `WebGLAdapterRenderPassEncoder` | ✅ | Render pass state management |
+| `WebGLAdapterRenderTarget` | ✅ | Offscreen render target with framebuffer |
+| `WebGLAdapterDrawTarget` | ✅ | Default framebuffer (canvas) target |
 
 **Key Features:**
 - Automatic backend selection via `createGPUContext()` factory
@@ -297,3 +316,60 @@ The WebGL adapter (`src/mol-gl/webgl/context-adapter.ts`) provides a bridge betw
 - Full support for vertex buffers, index buffers, and uniform buffers
 - Texture/sampler binding compatible with bind group abstraction
 - Blend, depth, stencil state management matching WebGPU patterns
+- Render target abstraction for Canvas3D integration
+- Named resource caches for texture/render target management
+- Utility methods: `clear()`, `checkError()`, `bindDrawingBuffer()`
+- Synchronization: `waitForGpuCommandsComplete()`, fence sync support
+
+### 13.10 GPUContext Interface Extensions
+
+The `GPUContext` interface has been extended to support Canvas3D integration:
+
+| Method/Property | Description |
+|-----------------|-------------|
+| `isModernContext` | Boolean indicating WebGL2 or WebGPU support |
+| `createRenderTarget(options)` | Create offscreen render target |
+| `createDrawTarget()` | Create default framebuffer target |
+| `namedTextures` | Named texture cache for resource management |
+| `namedRenderTargets` | Named render target cache |
+| `bindDrawingBuffer()` | Bind the main drawing buffer |
+| `clear(r, g, b, a)` | Clear current render target |
+| `checkError(message?)` | Check for GPU errors (debugging) |
+| `waitForGpuCommandsCompleteSync()` | Synchronous GPU fence |
+| `getFenceSync()` | Create a fence sync object |
+| `checkSyncStatus(sync)` | Check if fence has signaled |
+| `deleteSync(sync)` | Delete a fence sync object |
+
+These additions enable the Canvas3D integration to use the abstract `GPUContext` interface instead of the WebGL-specific `WebGLContext`.
+
+### 13.11 Canvas3D Compatibility Layer
+
+A new compatibility layer (`src/mol-canvas3d/context-compat.ts`) provides a bridge for using GPUContext with the existing Canvas3D infrastructure:
+
+| Component | Description |
+|-----------|-------------|
+| `Canvas3DContextCompat` | Extended context interface supporting both GPUContext and WebGLContext |
+| `createCanvas3DContextCompat()` | Factory function for async context creation with backend auto-selection |
+| `WebGLBackedGPUContext` | Interface for GPUContext backed by WebGL (provides `getWebGLContext()`) |
+| `isWebGLBackedContext()` | Type guard to check if GPUContext is WebGL-backed |
+
+**Usage Example:**
+```typescript
+import { createCanvas3DContextCompat } from './context-compat';
+
+// Create context with auto backend selection
+const ctx = await createCanvas3DContextCompat(canvas, assetManager, {
+    preferredBackend: 'auto', // or 'webgl' or 'webgpu'
+});
+
+// Access the backend type
+console.log('Using backend:', ctx.backend);
+
+// Use GPUContext for new code
+const texture = ctx.gpu.createTexture({ ... });
+
+// Use WebGLContext for backward compatibility
+const scene = Scene.create(ctx.webgl, transparency);
+```
+
+This compatibility layer allows gradual migration from WebGLContext to GPUContext without breaking existing code.

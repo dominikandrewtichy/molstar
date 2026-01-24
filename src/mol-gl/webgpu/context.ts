@@ -58,6 +58,8 @@ import {
     RenderPassDescriptor,
     RenderPassEncoder,
     ComputePassEncoder,
+    RenderTarget,
+    RenderTargetOptions,
 } from '../gpu/render-pass';
 
 /**
@@ -123,6 +125,8 @@ class WebGPUContext implements GPUContext {
     readonly limits: GPULimits;
     readonly stats: GPUStats;
     readonly contextRestored: Subject<now.Timestamp>;
+    readonly namedTextures: { [name: string]: Texture } = Object.create(null);
+    readonly namedRenderTargets: { [name: string]: RenderTarget } = Object.create(null);
 
     private _device: GPUDevice;
     private _gpuContext: GPUCanvasContext;
@@ -131,6 +135,7 @@ class WebGPUContext implements GPUContext {
     private _pixelScale: number;
     private _isContextLost: boolean = false;
     private _currentTexture: WebGPUTexture | null = null;
+    private _renderTargets: Set<WebGPURenderTarget> = new Set();
 
     constructor(
         device: GPUDevice,
@@ -191,6 +196,10 @@ class WebGPUContext implements GPUContext {
 
     get preferredFormat(): import('../gpu/texture').TextureFormat {
         return this._preferredFormat as import('../gpu/texture').TextureFormat;
+    }
+
+    get isModernContext(): boolean {
+        return true; // WebGPU is always "modern"
     }
 
     setContextLost(): void {
@@ -464,6 +473,42 @@ class WebGPUContext implements GPUContext {
         return new WebGPUShaderModule(gpuModule, this.stats);
     }
 
+    // Render target creation
+
+    createRenderTarget(options: RenderTargetOptions): RenderTarget {
+        const renderTarget = new WebGPURenderTarget(
+            this._device,
+            this.stats,
+            options.width,
+            options.height,
+            options.depth ?? true,
+            options.type ?? 'uint8',
+            options.filter ?? 'nearest',
+            options.format ?? 'rgba'
+        );
+        this._renderTargets.add(renderTarget);
+
+        const wrappedTarget: RenderTarget = {
+            id: renderTarget.id,
+            texture: renderTarget.texture,
+            getByteCount: () => renderTarget.getByteCount(),
+            getWidth: () => renderTarget.getWidth(),
+            getHeight: () => renderTarget.getHeight(),
+            bind: () => renderTarget.bind(),
+            setSize: (w, h) => renderTarget.setSize(w, h),
+            reset: () => renderTarget.reset(),
+            destroy: () => {
+                renderTarget.destroy();
+                this._renderTargets.delete(renderTarget);
+            }
+        };
+        return wrappedTarget;
+    }
+
+    createDrawTarget(): RenderTarget {
+        return new WebGPUDrawTarget(this._gpuContext, this._device);
+    }
+
     // Command encoding
 
     createCommandEncoder(): CommandEncoder {
@@ -522,12 +567,64 @@ class WebGPUContext implements GPUContext {
         return { width: texture.width, height: texture.height };
     }
 
+    bindDrawingBuffer(): void {
+        // WebGPU doesn't have a concept of "binding" the drawing buffer
+        // This is handled via render pass descriptors instead
+        // This method exists for API compatibility
+    }
+
+    // Utility methods
+
+    clear(red: number, green: number, blue: number, alpha: number): void {
+        // In WebGPU, clearing is done via render passes with loadOp: 'clear'
+        // Create a simple clear pass
+        const texture = this._gpuContext.getCurrentTexture();
+        const encoder = this._device.createCommandEncoder();
+        const pass = encoder.beginRenderPass({
+            colorAttachments: [{
+                view: texture.createView(),
+                clearValue: { r: red, g: green, b: blue, a: alpha },
+                loadOp: 'clear',
+                storeOp: 'store',
+            }],
+        });
+        pass.end();
+        this._device.queue.submit([encoder.finish()]);
+    }
+
+    checkError(_message?: string): void {
+        // WebGPU reports errors via validation, not via polling like WebGL
+        // Errors are handled through device.pushErrorScope/popErrorScope
+        // This method exists for API compatibility
+    }
+
     // Synchronization
 
     async waitForGpuCommandsComplete(): Promise<void> {
         // WebGPU doesn't have a direct equivalent, but we can submit an empty command buffer
         // and wait for the queue to be idle
         await this._device.queue.onSubmittedWorkDone();
+    }
+
+    waitForGpuCommandsCompleteSync(): void {
+        // WebGPU doesn't support synchronous waiting
+        // This is a no-op; callers should use the async version
+        console.warn('WebGPU does not support synchronous GPU waiting. Use waitForGpuCommandsComplete() instead.');
+    }
+
+    getFenceSync(): unknown | null {
+        // WebGPU doesn't have explicit fence sync objects like WebGL2
+        // Synchronization is handled via queue.onSubmittedWorkDone()
+        return null;
+    }
+
+    checkSyncStatus(_sync: unknown): boolean {
+        // WebGPU doesn't have explicit sync objects
+        return true;
+    }
+
+    deleteSync(_sync: unknown): void {
+        // WebGPU doesn't have explicit sync objects to delete
     }
 
     // Pixel reading
@@ -1273,5 +1370,259 @@ class WebGPUCommandBuffer implements CommandBuffer {
 
     getGPUCommandBuffer(): GPUCommandBuffer {
         return this._buffer;
+    }
+}
+
+// Render Target Classes
+
+let nextRenderTargetId = 0;
+
+/**
+ * WebGPU render target for offscreen rendering.
+ */
+class WebGPURenderTarget implements RenderTarget {
+    readonly id: number;
+
+    private _device: GPUDevice;
+    private _width: number;
+    private _height: number;
+    private _depth: boolean;
+    private _type: 'uint8' | 'float32' | 'fp16';
+    private _format: 'rgba' | 'alpha';
+    private _colorTexture: GPUTexture | null = null;
+    private _depthTexture: GPUTexture | null = null;
+    private _textureView: TextureView | null = null;
+    private _destroyed = false;
+
+    constructor(
+        device: GPUDevice,
+        _stats: GPUStats,
+        width: number,
+        height: number,
+        depth: boolean,
+        type: 'uint8' | 'float32' | 'fp16',
+        _filter: 'nearest' | 'linear',
+        format: 'rgba' | 'alpha'
+    ) {
+        this.id = nextRenderTargetId++;
+        this._device = device;
+        this._width = width;
+        this._height = height;
+        this._depth = depth;
+        this._type = type;
+        this._format = format;
+
+        this._initialize();
+    }
+
+    private _initialize(): void {
+        const device = this._device;
+
+        // Create color texture
+        this._colorTexture = device.createTexture({
+            size: { width: this._width, height: this._height },
+            format: this._getTextureFormat(),
+            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC,
+        });
+
+        // Create depth texture if needed
+        if (this._depth) {
+            this._depthTexture = device.createTexture({
+                size: { width: this._width, height: this._height },
+                format: 'depth32float',
+                usage: GPUTextureUsage.RENDER_ATTACHMENT,
+            });
+        }
+
+        // Create texture view wrapper
+        const self = this;
+        const wrapperTexture: Texture = {
+            id: createTextureId(),
+            width: this._width,
+            height: this._height,
+            depth: 1,
+            format: this._getAbstractFormat(),
+            dimension: '2d' as const,
+            mipLevelCount: 1,
+            sampleCount: 1,
+            write: () => {},
+            getByteCount: () => self.getByteCount(),
+            reset: () => self._initialize(),
+            destroy: () => {},
+            createView: () => self._textureView!,
+        };
+
+        this._textureView = new WebGPUTextureView(
+            this._colorTexture!.createView(),
+            wrapperTexture
+        );
+    }
+
+    private _getTextureFormat(): GPUTextureFormat {
+        if (this._format === 'alpha') return 'r8unorm';
+        switch (this._type) {
+            case 'fp16': return 'rgba16float';
+            case 'float32': return 'rgba32float';
+            default: return 'rgba8unorm';
+        }
+    }
+
+    private _getAbstractFormat(): import('../gpu/texture').TextureFormat {
+        if (this._format === 'alpha') return 'r8unorm';
+        switch (this._type) {
+            case 'fp16': return 'rgba16float';
+            case 'float32': return 'rgba32float';
+            default: return 'rgba8unorm';
+        }
+    }
+
+    get texture(): TextureView {
+        return this._textureView!;
+    }
+
+    getByteCount(): number {
+        const colorBytes = this._width * this._height * (this._type === 'float32' ? 16 : (this._type === 'fp16' ? 8 : 4));
+        const depthBytes = this._depth ? this._width * this._height * 4 : 0;
+        return colorBytes + depthBytes;
+    }
+
+    getWidth(): number {
+        return this._width;
+    }
+
+    getHeight(): number {
+        return this._height;
+    }
+
+    bind(): void {
+        // WebGPU doesn't bind render targets directly
+        // Binding happens via render pass descriptors
+        // This method exists for API compatibility
+    }
+
+    getGPUColorTexture(): GPUTexture | null {
+        return this._colorTexture;
+    }
+
+    getGPUDepthTexture(): GPUTexture | null {
+        return this._depthTexture;
+    }
+
+    setSize(width: number, height: number): void {
+        if (this._width === width && this._height === height) return;
+
+        // Destroy existing textures
+        this._colorTexture?.destroy();
+        this._depthTexture?.destroy();
+
+        this._width = width;
+        this._height = height;
+
+        // Recreate
+        this._initialize();
+    }
+
+    reset(): void {
+        this._initialize();
+    }
+
+    destroy(): void {
+        if (this._destroyed) return;
+
+        this._colorTexture?.destroy();
+        this._depthTexture?.destroy();
+
+        this._colorTexture = null;
+        this._depthTexture = null;
+        this._destroyed = true;
+    }
+}
+
+/**
+ * WebGPU draw target representing the swapchain texture.
+ */
+class WebGPUDrawTarget implements RenderTarget {
+    readonly id = -1;
+
+    private _gpuContext: GPUCanvasContext;
+    private _textureView: TextureView;
+
+    constructor(gpuContext: GPUCanvasContext, _device: GPUDevice) {
+        this._gpuContext = gpuContext;
+
+        // Create a dummy texture view wrapper
+        const self = this;
+        const texture = gpuContext.getCurrentTexture();
+        const dummyTexture: Texture = {
+            id: -1,
+            width: texture.width,
+            height: texture.height,
+            depth: 1,
+            format: 'rgba8unorm',
+            dimension: '2d' as const,
+            mipLevelCount: 1,
+            sampleCount: 1,
+            write: () => {},
+            getByteCount: () => 0,
+            reset: () => {},
+            destroy: () => {},
+            createView: () => self._textureView,
+        };
+
+        this._textureView = new WebGPUTextureView(
+            texture.createView(),
+            dummyTexture
+        );
+    }
+
+    get texture(): TextureView {
+        // Return a fresh view of the current swapchain texture
+        const texture = this._gpuContext.getCurrentTexture();
+        const self = this;
+        const wrapperTexture: Texture = {
+            id: -1,
+            width: texture.width,
+            height: texture.height,
+            depth: 1,
+            format: 'rgba8unorm',
+            dimension: '2d' as const,
+            mipLevelCount: 1,
+            sampleCount: 1,
+            write: () => {},
+            getByteCount: () => 0,
+            reset: () => {},
+            destroy: () => {},
+            createView: () => self._textureView,
+        };
+        return new WebGPUTextureView(texture.createView(), wrapperTexture);
+    }
+
+    getByteCount(): number {
+        return 0; // Swapchain memory is managed by the browser
+    }
+
+    getWidth(): number {
+        return this._gpuContext.getCurrentTexture().width;
+    }
+
+    getHeight(): number {
+        return this._gpuContext.getCurrentTexture().height;
+    }
+
+    bind(): void {
+        // WebGPU doesn't bind render targets directly
+        // This method exists for API compatibility
+    }
+
+    setSize(_width: number, _height: number): void {
+        // Swapchain size is controlled by canvas dimensions
+    }
+
+    reset(): void {
+        // Nothing to reset for the swapchain
+    }
+
+    destroy(): void {
+        // Swapchain is managed by the browser
     }
 }

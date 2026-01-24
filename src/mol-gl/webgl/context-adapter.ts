@@ -12,7 +12,9 @@ import {
     GPULimits,
     GPUStats,
     createGPUStats,
+    WebGLBackedGPUContext,
 } from '../gpu/context';
+import { WebGLContext, createContext as createWebGLContextImpl } from './context';
 import {
     Buffer,
     BufferDescriptor,
@@ -65,6 +67,8 @@ import {
     RenderPassEncoder,
     ComputePassEncoder,
     ColorAttachment,
+    RenderTarget,
+    RenderTargetOptions,
 } from '../gpu/render-pass';
 import { GLRenderingContext, isWebGL2 } from './compat';
 import { getGLContext } from './context';
@@ -104,12 +108,14 @@ export function createWebGLAdapterContext(
 /**
  * WebGL implementation of GPUContext interface.
  */
-class WebGLAdapterContext implements GPUContext {
+class WebGLAdapterContext implements WebGLBackedGPUContext {
     readonly backend = 'webgl' as const;
     readonly canvas: HTMLCanvasElement | OffscreenCanvas;
     readonly limits: GPULimits;
     readonly stats: GPUStats;
     readonly contextRestored: Subject<now.Timestamp>;
+    readonly namedTextures: { [name: string]: Texture } = Object.create(null);
+    readonly namedRenderTargets: { [name: string]: RenderTarget } = Object.create(null);
 
     private _gl: GLRenderingContext;
     private _extensions: WebGLExtensions;
@@ -117,6 +123,8 @@ class WebGLAdapterContext implements GPUContext {
     private _pixelScale: number;
     private _isContextLost: boolean = false;
     private _currentTexture: WebGLAdapterTexture | null = null;
+    private _renderTargets: Set<WebGLAdapterRenderTarget> = new Set();
+    private _webglContext: WebGLContext | null = null;
 
     constructor(
         gl: GLRenderingContext,
@@ -181,19 +189,43 @@ class WebGLAdapterContext implements GPUContext {
         return 'rgba8unorm';
     }
 
+    get isModernContext(): boolean {
+        return isWebGL2(this._gl);
+    }
+
     setContextLost(): void {
         this._isContextLost = true;
     }
 
     handleContextRestored(extraResets?: () => void): void {
         this._state.reset();
-        extraResets?.();
+        // Forward to WebGLContext if it exists
+        if (this._webglContext) {
+            this._webglContext.handleContextRestored(extraResets);
+        } else {
+            extraResets?.();
+        }
         this._isContextLost = false;
         this.contextRestored.next(now());
     }
 
     setPixelScale(value: number): void {
         this._pixelScale = value;
+        if (this._webglContext) {
+            this._webglContext.setPixelScale(value);
+        }
+    }
+
+    /**
+     * Get the underlying WebGLContext for backward compatibility.
+     * This creates a WebGLContext wrapper on first access.
+     * @deprecated Use GPUContext methods instead when possible.
+     */
+    getWebGLContext(): WebGLContext {
+        if (!this._webglContext) {
+            this._webglContext = createWebGLContextImpl(this._gl, { pixelScale: this._pixelScale });
+        }
+        return this._webglContext;
     }
 
     // Resource creation methods
@@ -244,6 +276,44 @@ class WebGLAdapterContext implements GPUContext {
     createShaderModule(descriptor: ShaderModuleDescriptor): ShaderModule {
         this.stats.resourceCounts.shaderModule++;
         return new WebGLAdapterShaderModule(this._gl, descriptor, this.stats);
+    }
+
+    // Render target creation
+
+    createRenderTarget(options: RenderTargetOptions): RenderTarget {
+        const renderTarget = new WebGLAdapterRenderTarget(
+            this._gl,
+            this.stats,
+            options.width,
+            options.height,
+            options.depth ?? true,
+            options.type ?? 'uint8',
+            options.filter ?? 'nearest',
+            options.format ?? 'rgba'
+        );
+        this._renderTargets.add(renderTarget);
+
+        // Wrap the render target to track destruction
+        const wrappedTarget: RenderTarget = {
+            id: renderTarget.id,
+            texture: renderTarget.texture,
+            getByteCount: () => renderTarget.getByteCount(),
+            getWidth: () => renderTarget.getWidth(),
+            getHeight: () => renderTarget.getHeight(),
+            bind: () => renderTarget.bind(),
+            setSize: (w, h) => renderTarget.setSize(w, h),
+            reset: () => renderTarget.reset(),
+            destroy: () => {
+                renderTarget.destroy();
+                this._renderTargets.delete(renderTarget);
+            }
+        };
+        return wrappedTarget;
+    }
+
+    createDrawTarget(): RenderTarget {
+        const gl = this._gl;
+        return new WebGLAdapterDrawTarget(gl);
     }
 
     // Command encoding
@@ -301,6 +371,48 @@ class WebGLAdapterContext implements GPUContext {
         };
     }
 
+    bindDrawingBuffer(): void {
+        this._gl.bindFramebuffer(this._gl.FRAMEBUFFER, null);
+    }
+
+    // Utility methods
+
+    clear(red: number, green: number, blue: number, alpha: number): void {
+        const gl = this._gl;
+        const drs = this.getDrawingBufferSize();
+        this.bindDrawingBuffer();
+        this._state.enable(gl.SCISSOR_TEST);
+        this._state.depthMask(true);
+        this._state.colorMask(true, true, true, true);
+        this._state.clearColor(red, green, blue, alpha);
+        this._state.viewport(0, 0, drs.width, drs.height);
+        this._state.scissor(0, 0, drs.width, drs.height);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    }
+
+    checkError(message?: string): void {
+        const gl = this._gl;
+        const error = gl.getError();
+        if (error !== gl.NO_ERROR) {
+            const errorDesc = this._getErrorDescription(error);
+            console.log(`WebGL error: '${errorDesc}'${message ? ` (${message})` : ''}`);
+        }
+    }
+
+    private _getErrorDescription(error: number): string {
+        const gl = this._gl;
+        switch (error) {
+            case gl.NO_ERROR: return 'no error';
+            case gl.INVALID_ENUM: return 'invalid enum';
+            case gl.INVALID_VALUE: return 'invalid value';
+            case gl.INVALID_OPERATION: return 'invalid operation';
+            case gl.INVALID_FRAMEBUFFER_OPERATION: return 'invalid framebuffer operation';
+            case gl.OUT_OF_MEMORY: return 'out of memory';
+            case gl.CONTEXT_LOST_WEBGL: return 'context lost';
+            default: return 'unknown error';
+        }
+    }
+
     // Synchronization
 
     async waitForGpuCommandsComplete(): Promise<void> {
@@ -328,6 +440,39 @@ class WebGLAdapterContext implements GPUContext {
             // WebGL1 fallback: force synchronization with readPixels
             gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
             return Promise.resolve();
+        }
+    }
+
+    waitForGpuCommandsCompleteSync(): void {
+        const gl = this._gl;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+    }
+
+    getFenceSync(): WebGLSync | null {
+        const gl = this._gl;
+        if (isWebGL2(gl)) {
+            return gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+        }
+        return null;
+    }
+
+    checkSyncStatus(sync: unknown): boolean {
+        const gl = this._gl;
+        if (!isWebGL2(gl) || !sync) return true;
+
+        const glSync = sync as WebGLSync;
+        if (gl.getSyncParameter(glSync, gl.SYNC_STATUS) === gl.SIGNALED) {
+            gl.deleteSync(glSync);
+            return true;
+        }
+        return false;
+    }
+
+    deleteSync(sync: unknown): void {
+        const gl = this._gl;
+        if (isWebGL2(gl) && sync) {
+            gl.deleteSync(sync as WebGLSync);
         }
     }
 
@@ -1607,5 +1752,273 @@ class WebGLAdapterCommandBuffer implements CommandBuffer {
         }
 
         this._executed = true;
+    }
+}
+
+// Render Target Classes
+
+let nextRenderTargetId = 0;
+
+/**
+ * WebGL render target for offscreen rendering.
+ */
+class WebGLAdapterRenderTarget implements RenderTarget {
+    readonly id: number;
+
+    private _gl: GLRenderingContext;
+    private _width: number;
+    private _height: number;
+    private _depth: boolean;
+    private _type: 'uint8' | 'float32' | 'fp16';
+    private _filter: 'nearest' | 'linear';
+    private _format: 'rgba' | 'alpha';
+    private _glTexture: WebGLTexture | null = null;
+    private _framebuffer: WebGLFramebuffer | null = null;
+    private _depthRenderbuffer: WebGLRenderbuffer | null = null;
+    private _textureView: TextureView | null = null;
+    private _destroyed = false;
+
+    constructor(
+        gl: GLRenderingContext,
+        _stats: GPUStats,
+        width: number,
+        height: number,
+        depth: boolean,
+        type: 'uint8' | 'float32' | 'fp16',
+        filter: 'nearest' | 'linear',
+        format: 'rgba' | 'alpha'
+    ) {
+        this.id = nextRenderTargetId++;
+        this._gl = gl;
+        this._width = width;
+        this._height = height;
+        this._depth = depth;
+        this._type = type;
+        this._filter = filter;
+        this._format = format;
+
+        this._initialize();
+    }
+
+    private _initialize(): void {
+        const gl = this._gl;
+        const is2 = isWebGL2(gl);
+
+        // Create framebuffer
+        this._framebuffer = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this._framebuffer);
+
+        // Create color texture
+        this._glTexture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, this._glTexture);
+
+        const { internalFormat, format, type } = this._getTextureFormatInfo();
+        const filterMode = this._filter === 'linear' ? gl.LINEAR : gl.NEAREST;
+
+        gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, this._width, this._height, 0, format, type, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filterMode);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filterMode);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this._glTexture, 0);
+
+        // Create depth renderbuffer if needed
+        if (this._depth) {
+            this._depthRenderbuffer = gl.createRenderbuffer();
+            gl.bindRenderbuffer(gl.RENDERBUFFER, this._depthRenderbuffer);
+
+            const depthFormat = is2
+                ? (gl as WebGL2RenderingContext).DEPTH_COMPONENT32F
+                : gl.DEPTH_COMPONENT16;
+            gl.renderbufferStorage(gl.RENDERBUFFER, depthFormat, this._width, this._height);
+            gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this._depthRenderbuffer);
+        }
+
+        // Reset bindings
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+        // Create texture view wrapper for the RenderTarget interface
+        const self = this;
+        const wrapperTexture: Texture = {
+            id: createTextureId(),
+            width: this._width,
+            height: this._height,
+            depth: 1,
+            format: this._getTextureFormat(),
+            dimension: '2d' as const,
+            mipLevelCount: 1,
+            sampleCount: 1,
+            write: () => {},
+            getByteCount: () => self._width * self._height * 4,
+            reset: () => self._initialize(),
+            destroy: () => {},
+            createView: () => self._textureView!,
+        };
+
+        this._textureView = new WebGLAdapterTextureView(wrapperTexture);
+    }
+
+    private _getTextureFormatInfo(): { internalFormat: number; format: number; type: number } {
+        const gl = this._gl;
+        const is2 = isWebGL2(gl);
+        const gl2 = gl as WebGL2RenderingContext;
+
+        if (this._format === 'alpha') {
+            if (!is2) throw new Error('Alpha format requires WebGL2');
+            return { internalFormat: gl2.R8, format: gl2.RED, type: gl.UNSIGNED_BYTE };
+        }
+
+        switch (this._type) {
+            case 'fp16':
+                if (!is2) throw new Error('FP16 requires WebGL2');
+                return { internalFormat: gl2.RGBA16F, format: gl.RGBA, type: gl2.HALF_FLOAT };
+            case 'float32':
+                if (!is2) throw new Error('Float32 requires WebGL2');
+                return { internalFormat: gl2.RGBA32F, format: gl.RGBA, type: gl.FLOAT };
+            default:
+                return { internalFormat: is2 ? gl2.RGBA8 : gl.RGBA, format: gl.RGBA, type: gl.UNSIGNED_BYTE };
+        }
+    }
+
+    private _getTextureFormat(): TextureFormat {
+        if (this._format === 'alpha') return 'r8unorm';
+        switch (this._type) {
+            case 'fp16': return 'rgba16float';
+            case 'float32': return 'rgba32float';
+            default: return 'rgba8unorm';
+        }
+    }
+
+    get texture(): TextureView {
+        return this._textureView!;
+    }
+
+    getByteCount(): number {
+        const colorBytes = this._width * this._height * (this._type === 'float32' ? 16 : (this._type === 'fp16' ? 8 : 4));
+        const depthBytes = this._depth ? this._width * this._height * 4 : 0;
+        return colorBytes + depthBytes;
+    }
+
+    getWidth(): number {
+        return this._width;
+    }
+
+    getHeight(): number {
+        return this._height;
+    }
+
+    bind(): void {
+        this._gl.bindFramebuffer(this._gl.FRAMEBUFFER, this._framebuffer);
+    }
+
+    setSize(width: number, height: number): void {
+        if (this._width === width && this._height === height) return;
+
+        this._width = width;
+        this._height = height;
+
+        const gl = this._gl;
+        const is2 = isWebGL2(gl);
+        const { internalFormat, format, type } = this._getTextureFormatInfo();
+
+        gl.bindTexture(gl.TEXTURE_2D, this._glTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, width, height, 0, format, type, null);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+
+        if (this._depthRenderbuffer) {
+            gl.bindRenderbuffer(gl.RENDERBUFFER, this._depthRenderbuffer);
+            const depthFormat = is2
+                ? (gl as WebGL2RenderingContext).DEPTH_COMPONENT32F
+                : gl.DEPTH_COMPONENT16;
+            gl.renderbufferStorage(gl.RENDERBUFFER, depthFormat, width, height);
+            gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+        }
+    }
+
+    reset(): void {
+        this._initialize();
+    }
+
+    destroy(): void {
+        if (this._destroyed) return;
+
+        const gl = this._gl;
+        if (this._glTexture) gl.deleteTexture(this._glTexture);
+        if (this._framebuffer) gl.deleteFramebuffer(this._framebuffer);
+        if (this._depthRenderbuffer) gl.deleteRenderbuffer(this._depthRenderbuffer);
+
+        this._glTexture = null;
+        this._framebuffer = null;
+        this._depthRenderbuffer = null;
+        this._destroyed = true;
+    }
+}
+
+/**
+ * WebGL draw target representing the default framebuffer (canvas).
+ */
+class WebGLAdapterDrawTarget implements RenderTarget {
+    readonly id = -1;
+
+    private _gl: GLRenderingContext;
+    private _textureView: TextureView;
+
+    constructor(gl: GLRenderingContext) {
+        this._gl = gl;
+
+        // Create a dummy texture view for the interface
+        const self = this;
+        const dummyTexture: Texture = {
+            id: -1,
+            width: gl.drawingBufferWidth,
+            height: gl.drawingBufferHeight,
+            depth: 1,
+            format: 'rgba8unorm' as TextureFormat,
+            dimension: '2d' as const,
+            mipLevelCount: 1,
+            sampleCount: 1,
+            write: () => {},
+            getByteCount: () => 0,
+            reset: () => {},
+            destroy: () => {},
+            createView: () => self._textureView,
+        };
+
+        this._textureView = new WebGLAdapterTextureView(dummyTexture);
+    }
+
+    get texture(): TextureView {
+        return this._textureView;
+    }
+
+    getByteCount(): number {
+        return 0; // Drawing buffer memory is managed by the browser
+    }
+
+    getWidth(): number {
+        return this._gl.drawingBufferWidth;
+    }
+
+    getHeight(): number {
+        return this._gl.drawingBufferHeight;
+    }
+
+    bind(): void {
+        this._gl.bindFramebuffer(this._gl.FRAMEBUFFER, null);
+    }
+
+    setSize(_width: number, _height: number): void {
+        // Drawing buffer size is controlled by canvas dimensions, not this method
+    }
+
+    reset(): void {
+        // Nothing to reset for the drawing buffer
+    }
+
+    destroy(): void {
+        // Drawing buffer is managed by the browser
     }
 }

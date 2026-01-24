@@ -10,7 +10,7 @@ import { Buffer, BufferDescriptor } from './buffer';
 import { Texture, TextureDescriptor, TextureView, TextureViewDescriptor, Sampler, SamplerDescriptor, TextureFormat } from './texture';
 import { BindGroup, BindGroupDescriptor, BindGroupLayout, BindGroupLayoutDescriptor, PipelineLayout, PipelineLayoutDescriptor } from './bind-group';
 import { RenderPipeline, RenderPipelineDescriptor, ComputePipeline, ComputePipelineDescriptor, ShaderModule, ShaderModuleDescriptor } from './pipeline';
-import { CommandEncoder, CommandBuffer, RenderPassDescriptor, RenderPassEncoder, ComputePassEncoder } from './render-pass';
+import { CommandEncoder, CommandBuffer, RenderPassDescriptor, RenderPassEncoder, ComputePassEncoder, RenderTarget, RenderTargetOptions } from './render-pass';
 
 export type GPUBackend = 'webgl' | 'webgpu';
 
@@ -63,6 +63,8 @@ export interface GPUContext {
     readonly stats: GPUStats;
     /** Preferred texture format for the canvas */
     readonly preferredFormat: TextureFormat;
+    /** Whether this is a WebGL2 or WebGPU context (both support modern features) */
+    readonly isModernContext: boolean;
 
     // Resource creation
     createBuffer(descriptor: BufferDescriptor): Buffer;
@@ -76,6 +78,24 @@ export interface GPUContext {
     createComputePipeline(descriptor: ComputePipelineDescriptor): ComputePipeline;
     createShaderModule(descriptor: ShaderModuleDescriptor): ShaderModule;
 
+    // Render target creation (for Canvas3D integration)
+    /**
+     * Create a render target for offscreen rendering.
+     * This creates a texture and framebuffer (or render pass) that can be rendered to.
+     */
+    createRenderTarget(options: RenderTargetOptions): RenderTarget;
+    /**
+     * Create a draw target that represents the main drawing buffer.
+     * This is used for rendering to the canvas directly.
+     */
+    createDrawTarget(): RenderTarget;
+
+    // Named resource caches (for Canvas3D integration)
+    /** Cache for named textures, managed by consumers */
+    readonly namedTextures: { [name: string]: Texture };
+    /** Cache for named render targets, managed by consumers */
+    readonly namedRenderTargets: { [name: string]: RenderTarget };
+
     // Command encoding
     createCommandEncoder(): CommandEncoder;
     submit(commandBuffers: CommandBuffer[]): void;
@@ -88,9 +108,31 @@ export interface GPUContext {
     getCurrentTexture(): Texture;
     resize(width: number, height: number): void;
     getDrawingBufferSize(): { width: number; height: number };
+    /** Bind the main drawing buffer for rendering */
+    bindDrawingBuffer(): void;
+
+    // Utility methods (for Canvas3D integration)
+    /**
+     * Clear the current drawing buffer with the specified color.
+     * This also clears depth and stencil if available.
+     */
+    clear(red: number, green: number, blue: number, alpha: number): void;
+    /**
+     * Check for errors (debugging utility).
+     * In WebGL this checks glGetError, in WebGPU this is a no-op (errors are reported via validation).
+     */
+    checkError(message?: string): void;
 
     // Synchronization
     waitForGpuCommandsComplete(): Promise<void>;
+    /** Synchronous fence check - blocks until GPU commands complete */
+    waitForGpuCommandsCompleteSync(): void;
+    /** Create a fence sync object for async checking */
+    getFenceSync(): unknown | null;
+    /** Check if a fence sync has signaled */
+    checkSyncStatus(sync: unknown): boolean;
+    /** Delete a fence sync object */
+    deleteSync(sync: unknown): void;
 
     // Pixel reading
     readPixels(x: number, y: number, width: number, height: number, buffer: Uint8Array | Float32Array | Int32Array): void;
@@ -151,4 +193,27 @@ export function createGPUStats(): GPUStats {
         instanceCount: 0,
         instancedDrawCount: 0,
     };
+}
+
+/**
+ * Type guard to check if a GPUContext is backed by WebGL.
+ * When true, the context can be cast to WebGLBackedGPUContext to access the underlying WebGLContext.
+ */
+export function isWebGLBackedContext(context: GPUContext): context is WebGLBackedGPUContext {
+    return context.backend === 'webgl';
+}
+
+/**
+ * Extended GPUContext interface for WebGL-backed contexts.
+ * Provides access to the underlying WebGLContext for backward compatibility during migration.
+ */
+export interface WebGLBackedGPUContext extends GPUContext {
+    readonly backend: 'webgl';
+
+    /**
+     * Get the underlying WebGLContext for backward compatibility.
+     * This is useful during the migration period when some code still requires WebGLContext.
+     * @deprecated Use GPUContext methods instead when possible.
+     */
+    getWebGLContext(): import('../webgl/context').WebGLContext;
 }

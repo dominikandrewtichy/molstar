@@ -236,3 +236,61 @@ export interface CommandEncoder {
 export interface CommandBuffer {
     readonly label?: string;
 }
+
+/**
+ * Filter mode for textures used in render targets.
+ */
+export type RenderTargetFilter = 'nearest' | 'linear';
+
+/**
+ * Data type for render target color texture.
+ */
+export type RenderTargetType = 'uint8' | 'float32' | 'fp16';
+
+/**
+ * Format for render target color texture.
+ */
+export type RenderTargetFormat = 'rgba' | 'alpha';
+
+/**
+ * Abstract render target interface for offscreen rendering.
+ * Provides a texture and framebuffer for rendering to an offscreen surface.
+ */
+export interface RenderTarget {
+    /** Unique identifier for this render target */
+    readonly id: number;
+    /** The color texture attached to this render target */
+    readonly texture: TextureView;
+    /** Get the byte count of all resources in this render target */
+    getByteCount(): number;
+    /** Get the current width */
+    getWidth(): number;
+    /** Get the current height */
+    getHeight(): number;
+    /** Bind this render target for rendering */
+    bind(): void;
+    /** Resize the render target */
+    setSize(width: number, height: number): void;
+    /** Reset after context loss */
+    reset(): void;
+    /** Destroy all resources */
+    destroy(): void;
+}
+
+/**
+ * Options for creating a render target.
+ */
+export interface RenderTargetOptions {
+    /** Width of the render target */
+    width: number;
+    /** Height of the render target */
+    height: number;
+    /** Whether to include a depth buffer (default: true) */
+    depth?: boolean;
+    /** Data type for the color texture (default: 'uint8') */
+    type?: RenderTargetType;
+    /** Texture filtering mode (default: 'nearest') */
+    filter?: RenderTargetFilter;
+    /** Color format (default: 'rgba') */
+    format?: RenderTargetFormat;
+}
