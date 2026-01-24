@@ -216,7 +216,7 @@ All renderables for Phase 4 have been ported:
 - [ ] Update Renderer to use GPUContext
 - [ ] Update Passes to use GPUContext
 - [ ] Add backend toggle to viewer settings
-- [x] WebGPU test examples (`src/examples/webgpu-test/`) - Basic triangle + animated mesh cube
+- [x] WebGPU test examples (`src/examples/webgpu-*/`) - Basic, mesh, and unified tests
 - [ ] Visual regression tests
 - [ ] Performance benchmarks
 
@@ -240,23 +240,21 @@ All renderables for Phase 4 have been ported:
 
 ### 13.7 Testing the WebGPU Backend
 
-Test examples have been created in `src/examples/webgpu-test/`:
+Test examples have been organized into separate directories in `src/examples/`:
 
-| File | Description |
-|------|-------------|
-| `index.ts` | Basic WebGPU tests: context creation, shader module, buffer/texture creation, simple triangle render |
-| `mesh-test.ts` | Animated 3D cube with lighting, demonstrates full render pipeline |
-| `unified-test.ts` | Unified backend test: demonstrates both WebGL and WebGPU working through common GPUContext interface |
-| `index.html` | HTML page for running basic tests |
-| `mesh.html` | HTML page for running mesh animation test |
-| `unified.html` | HTML page for running unified backend tests |
+| Directory | Description |
+|-----------|-------------|
+| `webgpu-basic/` | Basic WebGPU tests: context creation, shader module, buffer/texture creation, simple triangle render |
+| `webgpu-mesh/` | Animated 3D cube with lighting, demonstrates full render pipeline |
+| `webgpu-unified/` | Unified backend test: demonstrates both WebGL and WebGPU working through common GPUContext interface |
 
 **To run the tests:**
 
 1. Start the development server: `npm run dev`
 2. Navigate to:
-   - `http://localhost:5173/examples/webgpu-test/` - Basic tests
-   - `http://localhost:5173/examples/webgpu-test/mesh.html` - Mesh animation
+   - `http://localhost:5173/examples/webgpu-basic/` - Basic tests
+   - `http://localhost:5173/examples/webgpu-mesh/` - Mesh animation
+   - `http://localhost:5173/examples/webgpu-unified/` - Unified backend tests
 
 **Requirements:**
 - Chrome 113+ or Firefox with WebGPU enabled
