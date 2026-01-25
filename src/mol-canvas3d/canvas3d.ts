@@ -16,7 +16,8 @@ import { GraphicsRenderObject } from '../mol-gl/render-object';
 import { DefaultTrackballControlsAttribs, TrackballControls, TrackballControlsParams } from './controls/trackball';
 import { Viewport } from './camera/util';
 import { createContext, WebGLContext, getGLContext } from '../mol-gl/webgl/context';
-import { GPUBackend } from '../mol-gl/gpu/context';
+import { GPUBackend, isWebGLBackedContext } from '../mol-gl/gpu/context';
+import { createGPUContext } from '../mol-gl/gpu/context-factory';
 import { Representation } from '../mol-repr/representation';
 import { Scene } from '../mol-gl/scene';
 import { PickingId } from '../mol-geo/geometry/picking';
@@ -162,6 +163,8 @@ namespace Canvas3DContext {
         /** true to support multiple Canvas3D objects with a single context */
         preserveDrawingBuffer: true,
         preferWebGl1: false,
+        /** Preferred GPU backend ('webgl', 'webgpu', or 'auto' for automatic selection) */
+        preferredBackend: 'webgl' as GPUBackend | 'auto',
 
         handleResize: () => { },
     };
@@ -317,6 +320,211 @@ namespace Canvas3DContext {
 
                 canvas.removeEventListener('webglcontextlost', handleWebglContextLost, false);
                 canvas.removeEventListener('webglcontextrestored', handlewWebglContextRestored, false);
+                webgl.destroy(options);
+
+                contextLost.complete();
+                changed.complete();
+            }
+        };
+    }
+
+    /**
+     * Create a Canvas3DContext asynchronously with support for WebGPU backend.
+     * This method allows automatic backend selection or explicit WebGPU preference.
+     *
+     * @param canvas The canvas element to render to
+     * @param assetManager Asset manager for loading resources
+     * @param attribs Context attributes including preferredBackend
+     * @param props Context properties
+     * @returns Promise resolving to the Canvas3DContext
+     */
+    export async function fromCanvasAsync(
+        canvas: HTMLCanvasElement,
+        assetManager: AssetManager,
+        attribs: Partial<Attribs> = {},
+        props: Partial<Props> = {}
+    ): Promise<Canvas3DContext> {
+        const a = { ...DefaultAttribs, ...attribs };
+        const p = { ...DefaultProps, ...props };
+
+        // If WebGL is explicitly preferred or we're using the sync path, fall back to sync
+        if (a.preferredBackend === 'webgl') {
+            return fromCanvas(canvas, assetManager, attribs, props);
+        }
+
+        const { powerPreference, failIfMajorPerformanceCaveat, antialias, preserveDrawingBuffer, preferWebGl1, preferredBackend } = a;
+
+        // Try to create context using the GPU factory
+        const { context: gpuContext, backend } = await createGPUContext(
+            {
+                canvas,
+                pixelScale: p.pixelScale,
+                preferredBackend: preferredBackend,
+            },
+            {
+                webgl: {
+                    contextAttributes: {
+                        powerPreference,
+                        failIfMajorPerformanceCaveat,
+                        antialias,
+                        preserveDrawingBuffer,
+                        alpha: true,
+                        depth: true,
+                        premultipliedAlpha: true,
+                    },
+                    preferWebGl1,
+                },
+                webgpu: {
+                    powerPreference: powerPreference === 'high-performance' ? 'high-performance' : 'low-power',
+                },
+            }
+        );
+
+        // For now, we need WebGL for the rendering pipeline
+        // Once the renderer supports GPUContext directly, this can be removed
+        let webgl: WebGLContext;
+        if (isWebGLBackedContext(gpuContext)) {
+            webgl = gpuContext.getWebGLContext();
+        } else {
+            // WebGPU backend - still need WebGL for backward compatibility
+            // This is a temporary solution during migration
+            const gl = getGLContext(canvas, {
+                powerPreference,
+                failIfMajorPerformanceCaveat,
+                antialias,
+                preserveDrawingBuffer,
+                alpha: true,
+                depth: true,
+                premultipliedAlpha: true,
+                preferWebGl1
+            });
+            if (gl === null) {
+                throw new Error('Could not create a WebGL rendering context for backward compatibility');
+            }
+            webgl = createContext(gl, { pixelScale: p.pixelScale });
+        }
+
+        const getPixelScale = () => {
+            const scaled = (p.pixelScale / (typeof window !== 'undefined' ? (window?.devicePixelRatio || 1) : 1));
+            if (p.resolutionMode === 'auto') {
+                return isMobileBrowser() ? scaled : p.pixelScale;
+            }
+            return p.resolutionMode === 'native' ? p.pixelScale : scaled;
+        };
+        const syncPixelScale = () => {
+            const pixelScale = getPixelScale();
+            input.setPixelScale(pixelScale);
+            webgl.setPixelScale(pixelScale);
+            gpuContext.setPixelScale(pixelScale);
+        };
+
+        const { pickScale, transparency } = p;
+        const pixelScale = getPixelScale();
+        const input = InputObserver.fromElement(canvas, { pixelScale, preventGestures: true });
+        const passes = new Passes(webgl, assetManager, { pickScale, transparency });
+
+        if (isDebugMode) {
+            const loseContextExt = webgl.gl.getExtension('WEBGL_lose_context');
+            if (loseContextExt) {
+                canvas.addEventListener('mousedown', e => {
+                    if (webgl.isContextLost) return;
+                    if (!e.shiftKey || !e.ctrlKey || !e.altKey) return;
+
+                    if (isDebugMode) console.log('lose context');
+                    loseContextExt.loseContext();
+
+                    setTimeout(() => {
+                        if (!webgl.isContextLost) return;
+                        if (isDebugMode) console.log('restore context');
+                        loseContextExt.restoreContext();
+                    }, 1000);
+                }, false);
+            }
+        }
+
+        const contextLost = new Subject<now.Timestamp>();
+
+        const handleWebglContextLost = (e: Event) => {
+            webgl.setContextLost();
+            gpuContext.setContextLost();
+            e.preventDefault();
+            if (isDebugMode) console.log('context lost');
+            contextLost.next(now());
+        };
+
+        const handlewWebglContextRestored = () => {
+            if (!webgl.isContextLost) return;
+            webgl.handleContextRestored(() => {
+                passes.draw.reset();
+                passes.pick.reset();
+                passes.illumination.reset();
+            });
+            gpuContext.handleContextRestored();
+            if (isDebugMode) console.log('context restored');
+        };
+
+        canvas.addEventListener('webglcontextlost', handleWebglContextLost, false);
+        canvas.addEventListener('webglcontextrestored', handlewWebglContextRestored, false);
+
+        const changed = new BehaviorSubject<undefined>(undefined);
+
+        return {
+            canvas,
+            webgl,
+            input,
+            passes,
+            attribs: a,
+            get props() { return { ...p }; },
+            contextLost,
+            contextRestored: webgl.contextRestored,
+            assetManager,
+            changed,
+            get pixelScale() { return getPixelScale(); },
+            backend: backend,
+
+            syncPixelScale,
+            setProps: (props?: Partial<Props>) => {
+                if (!props) return;
+
+                let hasChanged = false;
+                let pixelScaleNeedsUpdate = false;
+
+                if (props.resolutionMode !== undefined && props.resolutionMode !== p.resolutionMode) {
+                    p.resolutionMode = props.resolutionMode;
+                    pixelScaleNeedsUpdate = true;
+                }
+
+                if (props.pixelScale !== undefined && props.pixelScale !== p.pixelScale) {
+                    p.pixelScale = props.pixelScale;
+                    pixelScaleNeedsUpdate = true;
+                }
+
+                if (pixelScaleNeedsUpdate) {
+                    syncPixelScale();
+                    a.handleResize();
+                    hasChanged = true;
+                }
+
+                if (props.pickScale !== undefined && props.pickScale !== p.pickScale) {
+                    p.pickScale = props.pickScale;
+                    passes.setPickScale(props.pickScale);
+                    hasChanged = true;
+                }
+
+                if (props.transparency !== undefined && props.transparency !== p.transparency) {
+                    p.transparency = props.transparency;
+                    passes.setTransparency(props.transparency);
+                    hasChanged = true;
+                }
+
+                if (hasChanged) changed.next(undefined);
+            },
+            dispose: (options?: Partial<{ doNotForceWebGLContextLoss: boolean }>) => {
+                input.dispose();
+
+                canvas.removeEventListener('webglcontextlost', handleWebglContextLost, false);
+                canvas.removeEventListener('webglcontextrestored', handlewWebglContextRestored, false);
+                gpuContext.destroy();
                 webgl.destroy(options);
 
                 contextLost.complete();

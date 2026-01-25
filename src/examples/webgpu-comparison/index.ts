@@ -21,6 +21,7 @@ import { Torus } from '../../mol-geo/primitive/torus';
 import { ParamDefinition } from '../../mol-util/param-definition';
 import { AssetManager } from '../../mol-util/assets';
 import { getBackendSupportInfo } from '../../mol-gl/gpu/context-factory';
+import { GPUBackend } from '../../mol-gl/gpu/context';
 import './index.html';
 
 const CANVAS_WIDTH = 400;
@@ -84,13 +85,25 @@ function createMeshRepresentation(): Representation.Any {
     return Representation.fromRenderObject('mesh', renderObject);
 }
 
-async function initializeWebGLCanvas(setup: CanvasSetup, assetManager: AssetManager): Promise<void> {
+async function initializeCanvas(
+    setup: CanvasSetup,
+    assetManager: AssetManager,
+    preferredBackend: GPUBackend | 'auto'
+): Promise<void> {
     try {
-        setup.statusDiv.textContent = 'Creating WebGL context...';
+        setup.statusDiv.textContent = `Creating ${preferredBackend} context...`;
 
-        const canvas3dContext = Canvas3DContext.fromCanvas(setup.canvas, assetManager, {
-            // Force WebGL backend
-        });
+        // Use async factory for WebGPU support, sync for explicit WebGL
+        let canvas3dContext: Canvas3DContext;
+        if (preferredBackend === 'webgl') {
+            canvas3dContext = Canvas3DContext.fromCanvas(setup.canvas, assetManager, {
+                preferredBackend: 'webgl'
+            });
+        } else {
+            canvas3dContext = await Canvas3DContext.fromCanvasAsync(setup.canvas, assetManager, {
+                preferredBackend: preferredBackend
+            });
+        }
 
         setup.context = canvas3dContext;
         const canvas3d = Canvas3D.create(canvas3dContext);
@@ -107,14 +120,19 @@ async function initializeWebGLCanvas(setup: CanvasSetup, assetManager: AssetMana
         // Start animation
         canvas3d.animate();
 
-        const gl = canvas3dContext.webgl?.gl;
-        const version = gl?.getParameter(gl.VERSION) || 'Unknown';
-
-        setup.statusDiv.textContent = `WebGL: ${version}`;
+        // Display backend info
+        const backend = canvas3dContext.backend;
+        if (backend === 'webgl') {
+            const gl = canvas3dContext.webgl?.gl;
+            const version = gl?.getParameter(gl.VERSION) || 'Unknown';
+            setup.statusDiv.textContent = `WebGL: ${version}`;
+        } else {
+            setup.statusDiv.textContent = `WebGPU backend active`;
+        }
         setup.statusDiv.className = 'status success';
 
     } catch (error) {
-        setup.statusDiv.textContent = `WebGL Error: ${error instanceof Error ? error.message : String(error)}`;
+        setup.statusDiv.textContent = `Error: ${error instanceof Error ? error.message : String(error)}`;
         setup.statusDiv.className = 'status error';
         throw error;
     }
@@ -201,7 +219,7 @@ async function runVisualComparison() {
         setups.push(webglSetup);
 
         try {
-            await initializeWebGLCanvas(webglSetup, assetManager);
+            await initializeCanvas(webglSetup, assetManager, 'webgl');
         } catch (error) {
             console.error('WebGL initialization failed:', error);
         }
@@ -212,24 +230,18 @@ async function runVisualComparison() {
         comparisonContainer.appendChild(noWebGL);
     }
 
-    // Create WebGPU canvas (placeholder - Canvas3D doesn't yet support native WebGPU)
-    // For now, we'll create another WebGL canvas as a placeholder
-    // Once the migration is complete, this will use the WebGPU backend
+    // Create WebGPU canvas
+    // Uses the async context factory with WebGPU preference
+    // Note: Currently rendering still uses WebGL as the Renderer hasn't been fully migrated
     if (supportInfo.webgpu.supported) {
-        const webgpuSetup = createCanvasContainer(comparisonContainer, 'WebGPU Backend (via GPUContext)');
+        const webgpuSetup = createCanvasContainer(comparisonContainer, 'WebGPU Backend');
         setups.push(webgpuSetup);
 
         try {
-            // For now, use WebGL through the GPUContext adapter
-            // This demonstrates the abstraction layer working
-            await initializeWebGLCanvas(webgpuSetup, assetManager);
-
-            // Update status to indicate it's using the GPUContext adapter
-            webgpuSetup.statusDiv.textContent = 'WebGPU-style API via WebGL adapter';
-            webgpuSetup.statusDiv.className = 'status success';
-
+            // Use the async factory with WebGPU preference
+            await initializeCanvas(webgpuSetup, assetManager, 'webgpu');
         } catch (error) {
-            console.error('WebGPU-style initialization failed:', error);
+            console.error('WebGPU initialization failed:', error);
         }
     } else {
         const noWebGPU = document.createElement('div');

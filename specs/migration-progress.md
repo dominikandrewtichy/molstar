@@ -236,10 +236,59 @@ All renderables for Phase 4 have been ported:
 - [x] Update Passes with `fromGPUContext()` static factory method
 - [x] Add backend toggle to viewer settings (GPUBackend config in PluginConfig, display in SimpleSettings)
 - [x] WebGPU test examples (`src/examples/webgpu-*/`) - Basic, mesh, and unified tests
+- [x] Add `Canvas3DContext.fromCanvasAsync()` for WebGPU context creation
+- [x] Update webgpu-comparison example to use async context factory
+- [ ] Port Renderer to accept native WebGPU context (currently requires WebGL-backed context)
 - [ ] Visual regression tests
 - [ ] Performance benchmarks
 
-### 13.6 Notes for Continuing Implementation
+### 13.6 Renderer Migration to GPUContext
+
+The Renderer is the critical component that needs to be ported to support native WebGPU rendering. Currently, `Renderer.createFromGPUContext()` requires a WebGL-backed GPUContext.
+
+#### Current WebGL Dependencies in Renderer
+
+The Renderer uses direct WebGL state machine calls through the `state` object:
+
+| Current WebGL Call | Abstract RenderState Method |
+|---|---|
+| `state.disable(gl.BLEND)` | `renderState.disableBlend()` |
+| `state.enable(gl.BLEND)` | `renderState.enableBlend()` |
+| `state.disable(gl.DEPTH_TEST)` | `renderState.disableDepthTest()` |
+| `state.enable(gl.DEPTH_TEST)` | `renderState.enableDepthTest()` |
+| `state.depthMask(flag)` | `renderState.depthMask(flag)` |
+| `state.depthFunc(gl.LESS)` | `renderState.depthFunc('less')` |
+| `state.depthFunc(gl.GREATER)` | `renderState.depthFunc('greater')` |
+| `state.disable(gl.CULL_FACE)` | `renderState.disableCullFace()` |
+| `state.enable(gl.CULL_FACE)` | `renderState.enableCullFace()` |
+| `state.frontFace(gl.CCW)` | `renderState.frontFace('ccw')` |
+| `state.frontFace(gl.CW)` | `renderState.frontFace('cw')` |
+| `state.cullFace(gl.BACK)` | `renderState.cullFace('back')` |
+| `state.cullFace(gl.FRONT)` | `renderState.cullFace('front')` |
+| `state.blendFunc(src, dst)` | `renderState.blendFunc(srcFactor, dstFactor)` |
+| `state.blendFuncSeparate(...)` | `renderState.blendFuncSeparate(...)` |
+| `state.enable(gl.SCISSOR_TEST)` | `renderState.enableScissorTest()` |
+| `state.colorMask(...)` | `renderState.colorMask(...)` |
+| `state.viewport(...)` | `renderState.viewport(...)` |
+| `state.scissor(...)` | `renderState.scissor(...)` |
+
+#### Migration Strategy
+
+1. **Phase 1 (Complete)**: RenderState interface and implementations exist
+2. **Phase 2 (In Progress)**: Refactor Renderer to use RenderState instead of direct WebGL calls
+3. **Phase 3**: Update GraphicsRenderable to work with GPUContext
+4. **Phase 4**: Enable `Renderer.createFromGPUContext()` to accept native WebGPU contexts
+
+#### Files to Modify
+
+| File | Changes Needed |
+|------|----------------|
+| `src/mol-gl/renderer.ts` | Replace all `state.enable/disable(gl.*)` with RenderState methods |
+| `src/mol-gl/render-item.ts` | Update to work with GPUContext for program/buffer management |
+| `src/mol-gl/renderable.ts` | Abstract shader compilation for GLSL/WGSL |
+| `src/mol-gl/scene.ts` | Update to accept GPUContext instead of WebGLContext |
+
+### 13.7 Notes for Continuing Implementation
 
 1. **TypeScript Compilation**: All new files compile cleanly. Run `npx tsc --noEmit` to verify.
 
@@ -257,7 +306,7 @@ All renderables for Phase 4 have been ported:
 
 7. **Pipeline Cache**: The `PipelineCache` class handles the permutation explosion. Register pipeline creators per shader, and the cache handles variant creation.
 
-### 13.7 Testing the WebGPU Backend
+### 13.8 Testing the WebGPU Backend
 
 Test examples have been organized into separate directories in `src/examples/`:
 
@@ -281,7 +330,7 @@ Test examples have been organized into separate directories in `src/examples/`:
 - Chrome 113+ or Firefox with WebGPU enabled
 - Hardware that supports WebGPU
 
-### 13.8 Current Status Summary
+### 13.9 Current Status Summary
 
 | Phase | Status | Completion |
 |-------|--------|------------|
@@ -317,7 +366,7 @@ Test examples have been organized into separate directories in `src/examples/`:
 7. 🟡 Visual regression tests (comparison test example created, automated testing pending)
 8. Performance benchmarks
 
-### 13.9 WebGL Adapter Implementation
+### 13.10 WebGL Adapter Implementation
 
 The WebGL adapter (`src/mol-gl/webgl/context-adapter.ts`) provides a bridge between the abstract `GPUContext` interface and WebGL:
 
@@ -348,7 +397,7 @@ The WebGL adapter (`src/mol-gl/webgl/context-adapter.ts`) provides a bridge betw
 - Utility methods: `clear()`, `checkError()`, `bindDrawingBuffer()`
 - Synchronization: `waitForGpuCommandsComplete()`, fence sync support
 
-### 13.10 GPUContext Interface Extensions
+### 13.11 GPUContext Interface Extensions
 
 The `GPUContext` interface has been extended to support Canvas3D integration:
 
@@ -369,7 +418,7 @@ The `GPUContext` interface has been extended to support Canvas3D integration:
 
 These additions enable the Canvas3D integration to use the abstract `GPUContext` interface instead of the WebGL-specific `WebGLContext`.
 
-### 13.11 Canvas3D Compatibility Layer
+### 13.12 Canvas3D Compatibility Layer
 
 A new compatibility layer (`src/mol-canvas3d/context-compat.ts`) provides a bridge for using GPUContext with the existing Canvas3D infrastructure:
 
@@ -401,7 +450,7 @@ const scene = Scene.create(ctx.webgl, transparency);
 
 This compatibility layer allows gradual migration from WebGLContext to GPUContext without breaking existing code.
 
-### 13.12 RenderState Interface
+### 13.13 RenderState Interface
 
 The `RenderState` interface (`src/mol-gl/gpu/render-state.ts`) provides abstract render state management that works with both WebGL and WebGPU:
 
@@ -434,7 +483,7 @@ const blendState = ctx.state.getBlendState();
 const depthState = ctx.state.getDepthStencilState();
 ```
 
-### 13.13 Renderer and Passes GPUContext Support
+### 13.14 Renderer and Passes GPUContext Support
 
 Factory methods have been added to support GPUContext:
 
@@ -458,7 +507,7 @@ const passes = new Passes(webglContext, assetManager, attribs);
 
 **Note:** Both factory methods currently require WebGL-backed GPUContext. Native WebGPU rendering will be enabled as the migration progresses.
 
-### 13.14 WebGPU Compute Pipelines
+### 13.15 WebGPU Compute Pipelines
 
 The compute shader system has been fully ported to WebGPU with native compute shaders:
 
