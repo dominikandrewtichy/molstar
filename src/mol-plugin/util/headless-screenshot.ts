@@ -66,7 +66,7 @@ export class HeadlessScreenshotHelper {
                 input.dispose();
                 webgl.destroy();
             };
-            this.canvas3d = Canvas3D.create({ webgl, input, passes, attribs, props, assetManager, pixelScale, syncPixelScale, setProps, dispose }, options?.canvas ?? defaultCanvas3DParams());
+            this.canvas3d = Canvas3D.create({ webgl, input, passes, attribs, props, assetManager, pixelScale, syncPixelScale, setProps, dispose, backend: 'webgl' }, options?.canvas ?? defaultCanvas3DParams());
         }
 
         this.imagePass = this.canvas3d.getImagePass(options?.imagePass ?? defaultImagePassParams());

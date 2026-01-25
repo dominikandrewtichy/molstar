@@ -13,6 +13,7 @@ import { StructureRepresentationPresetProvider } from '../mol-plugin-state/build
 import { PluginFeatureDetection } from './features';
 import { SaccharideCompIdMapType } from '../mol-model/structure/structure/carbohydrates/constants';
 import { BackgroundProps } from '../mol-canvas3d/passes/background';
+import { GPUBackend } from '../mol-gl/gpu/context';
 
 export class PluginConfigItem<T = any> {
     toString() { return this.key; }
@@ -37,6 +38,8 @@ export const PluginConfig = {
         AllowMajorPerformanceCaveat: item('plugin-config.allow-major-performance-caveat', false),
         PowerPreference: item<WebGLContextAttributes['powerPreference']>('plugin-config.power-preference', 'high-performance'),
         ResolutionMode: item<'auto' | 'scaled' | 'native'>('plugin-config.resolution-mode', 'auto'),
+        /** Preferred GPU backend. 'auto' will use WebGPU if available, falling back to WebGL. */
+        GPUBackend: item<GPUBackend | 'auto'>('plugin-config.gpu-backend', PluginFeatureDetection.defaultGPUBackend),
     },
     State: {
         DefaultServer: item('plugin-state.server', 'https://webchem.ncbr.muni.cz/molstar-state'),

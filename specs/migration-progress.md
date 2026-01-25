@@ -219,7 +219,7 @@ All renderables for Phase 4 have been ported:
 - [x] Implement `RenderState` in WebGPU context (`WebGPURenderState`)
 - [x] Update Renderer with `createFromGPUContext()` factory method
 - [x] Update Passes with `fromGPUContext()` static factory method
-- [ ] Add backend toggle to viewer settings
+- [x] Add backend toggle to viewer settings (GPUBackend config in PluginConfig, display in SimpleSettings)
 - [x] WebGPU test examples (`src/examples/webgpu-*/`) - Basic, mesh, and unified tests
 - [ ] Visual regression tests
 - [ ] Performance benchmarks
@@ -273,9 +273,9 @@ Test examples have been organized into separate directories in `src/examples/`:
 | 3. Pipeline System | ✅ Complete | 100% |
 | 4. Renderables | ✅ Complete | 100% |
 | 5. Advanced Features | ✅ Complete | ~95% |
-| 6. Integration | 🟡 In Progress | ~75% |
+| 6. Integration | 🟡 In Progress | ~85% |
 
-**Overall Progress:** ~95%
+**Overall Progress:** ~97%
 
 **Completed Work:**
 - ✅ WebGL adapter for GPUContext interface
@@ -287,13 +287,14 @@ Test examples have been organized into separate directories in `src/examples/`:
 - ✅ RenderState implementations for WebGL and WebGPU
 - ✅ Renderer.createFromGPUContext() factory method
 - ✅ Passes.fromGPUContext() static factory method
+- ✅ Backend toggle in viewer settings (GPUBackend config in PluginConfig.General, display in SimpleSettings advanced section)
 
 **Remaining Critical Work:**
 1. ✅ Canvas3D integration with async context creation (added `context-compat.ts` compatibility layer)
 2. ✅ Add RenderState to GPUContext (enables abstract render state management)
 3. ✅ Update Renderer with GPUContext factory method
 4. ✅ Update Passes with GPUContext factory method
-5. Add backend toggle to viewer settings
+5. ✅ Add backend toggle to viewer settings (GPUBackend config + UI display)
 6. Compute shader ports (histogram pyramid, marching cubes)
 7. Visual regression tests
 8. Performance benchmarks

@@ -16,6 +16,7 @@ import { GraphicsRenderObject } from '../mol-gl/render-object';
 import { DefaultTrackballControlsAttribs, TrackballControls, TrackballControlsParams } from './controls/trackball';
 import { Viewport } from './camera/util';
 import { createContext, WebGLContext, getGLContext } from '../mol-gl/webgl/context';
+import { GPUBackend } from '../mol-gl/gpu/context';
 import { Representation } from '../mol-repr/representation';
 import { Scene } from '../mol-gl/scene';
 import { PickingId } from '../mol-geo/geometry/picking';
@@ -144,6 +145,8 @@ interface Canvas3DContext {
     readonly assetManager: AssetManager
     readonly changed?: BehaviorSubject<undefined>
     readonly pixelScale: number
+    /** The GPU backend being used ('webgl' or 'webgpu') */
+    readonly backend: GPUBackend
 
     syncPixelScale(): void
     setProps: (props?: Partial<Canvas3DContext.Props>) => void
@@ -169,6 +172,8 @@ namespace Canvas3DContext {
         pixelScale: PD.Numeric(1, { min: 0.1, max: 2, step: 0.05 }),
         pickScale: PD.Numeric(0.25, { min: 0.1, max: 1, step: 0.05 }),
         transparency: PD.Select('wboit', [['blended', 'Blended'], ['wboit', 'Weighted, Blended'], ['dpoit', 'Depth Peeling']] as const),
+        /** Read-only display of the current GPU backend */
+        gpuBackend: PD.Text('webgl', { label: 'GPU Backend', description: 'The GPU rendering backend currently in use. Change via startup configuration.' }),
     };
     export const DefaultProps = PD.getDefaultValues(Params);
     export type Props = PD.Values<typeof Params>
@@ -268,6 +273,7 @@ namespace Canvas3DContext {
             assetManager,
             changed,
             get pixelScale() { return getPixelScale(); },
+            backend: 'webgl' as GPUBackend,
 
             syncPixelScale,
             setProps: (props?: Partial<Props>) => {

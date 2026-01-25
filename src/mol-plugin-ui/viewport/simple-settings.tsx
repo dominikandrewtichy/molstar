@@ -79,6 +79,7 @@ const SimpleSettingsParams = {
         resolutionMode: Canvas3DContext.Params.resolutionMode,
         pixelScale: Canvas3DContext.Params.pixelScale,
         transparency: Canvas3DContext.Params.transparency,
+        gpuBackend: Canvas3DContext.Params.gpuBackend,
     }),
 };
 
@@ -113,7 +114,8 @@ const SimpleSettingsMapping = ParamMapping({
         if (r.left !== 'hidden' && (!c || c.left !== 'none')) layout.push('left');
         if (r.right !== 'hidden' && (!c || c.right !== 'none')) layout.push('right');
         const { pixelScale, transparency, resolutionMode } = ctx.canvas3dContext?.props!;
-        return { canvas: ctx.canvas3d?.props!, layout, resolutionMode, pixelScale, transparency };
+        const gpuBackend = ctx.canvas3dContext?.backend ?? 'webgl';
+        return { canvas: ctx.canvas3d?.props!, layout, resolutionMode, pixelScale, transparency, gpuBackend };
     }
 })({
     values(props, ctx) {
@@ -148,6 +150,7 @@ const SimpleSettingsMapping = ParamMapping({
                 resolutionMode: props.resolutionMode,
                 pixelScale: props.pixelScale,
                 transparency: props.transparency,
+                gpuBackend: props.gpuBackend,
             },
         };
     },

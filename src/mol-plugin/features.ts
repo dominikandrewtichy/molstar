@@ -1,11 +1,12 @@
 /**
- * Copyright (c) 2021-2024 mol* contributors, licensed under MIT, See LICENSE file for more info.
+ * Copyright (c) 2021-2026 mol* contributors, licensed under MIT, See LICENSE file for more info.
  *
  * @author David Sehnal <david.sehnal@gmail.com>
  * @author Alexander Rose <alexander.rose@weirdbyte.de>
  */
 
 import { is_iOS } from '../mol-util/browser';
+import { isWebGPUSupported, GPUBackend } from '../mol-gl/gpu/context';
 
 export const PluginFeatureDetection = {
     get defaultTransparency(): 'blended' | 'wboit' | 'dpoit' {
@@ -26,5 +27,21 @@ export const PluginFeatureDetection = {
         }
 
         return is_iOS();
+    },
+    /**
+     * Get the default GPU backend preference.
+     * Returns 'auto' which will use WebGPU if available, falling back to WebGL.
+     * On iOS and older Safari versions, WebGL is preferred for stability.
+     */
+    get defaultGPUBackend(): GPUBackend | 'auto' {
+        // For now, default to 'auto' which prefers WebGPU when available
+        // On iOS, WebGPU support is limited, so we stick with 'auto' which will fallback appropriately
+        return 'auto';
+    },
+    /**
+     * Check if WebGPU is supported in the current environment.
+     */
+    get isWebGPUAvailable(): boolean {
+        return isWebGPUSupported();
     },
 };
