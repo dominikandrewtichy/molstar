@@ -61,6 +61,17 @@ import {
     RenderTarget,
     RenderTargetOptions,
 } from '../gpu/render-pass';
+import {
+    RenderState,
+    BlendFactor,
+    BlendOperation,
+    BlendState,
+    CullMode,
+    FrontFace,
+    StencilOperation,
+    CompareFunction,
+    DepthStencilStateDescriptor,
+} from '../gpu/render-state';
 
 /**
  * WebGPU-specific context options.
@@ -127,6 +138,7 @@ class WebGPUContext implements GPUContext {
     readonly contextRestored: Subject<now.Timestamp>;
     readonly namedTextures: { [name: string]: Texture } = Object.create(null);
     readonly namedRenderTargets: { [name: string]: RenderTarget } = Object.create(null);
+    readonly state: RenderState;
 
     private _device: GPUDevice;
     private _gpuContext: GPUCanvasContext;
@@ -155,6 +167,7 @@ class WebGPUContext implements GPUContext {
         this.limits = this._createLimits();
         this.stats = createGPUStats();
         this.contextRestored = new Subject<now.Timestamp>();
+        this.state = new WebGPURenderState();
 
         // Handle device loss
         device.lost.then((info) => {
@@ -1622,5 +1635,303 @@ class WebGPUDrawTarget implements RenderTarget {
 
     destroy(): void {
         // Swapchain is managed by the browser
+    }
+}
+
+/**
+ * WebGPU implementation of RenderState interface.
+ *
+ * In WebGPU, render state is immutable and baked into pipeline objects.
+ * This class tracks the desired state for:
+ * 1. Pipeline creation/selection
+ * 2. Dynamic state that can be set during render pass (viewport, scissor)
+ *
+ * Most "state changes" just update tracked values - they don't apply immediately
+ * because WebGPU pipelines are immutable.
+ */
+class WebGPURenderState implements RenderState {
+    currentProgramId: number = -1;
+    currentMaterialId: number = -1;
+    currentRenderItemId: number = -1;
+
+    // Track current state for pipeline creation
+    private _blendEnabled = false;
+    private _depthTestEnabled = false;
+    private _stencilTestEnabled = false;
+    private _cullFaceEnabled = false;
+    private _cullMode: CullMode = 'back';
+    private _frontFace: FrontFace = 'ccw';
+
+    // Blend state tracking
+    private _blendSrcRGB: BlendFactor = 'one';
+    private _blendDstRGB: BlendFactor = 'zero';
+    private _blendSrcAlpha: BlendFactor = 'one';
+    private _blendDstAlpha: BlendFactor = 'zero';
+    private _blendOpRGB: BlendOperation = 'add';
+    private _blendOpAlpha: BlendOperation = 'add';
+
+    // Depth state tracking
+    private _depthWriteEnabled = true;
+    private _depthCompare: CompareFunction = 'less';
+
+    // Viewport and scissor (these are dynamic in WebGPU)
+    private _viewport: [number, number, number, number] = [0, 0, 0, 0];
+    private _scissor: [number, number, number, number] = [0, 0, 0, 0];
+
+    // Vertex attribute tracking (for compatibility)
+    private _enabledVertexAttribs: Set<number> = new Set();
+
+    // Feature enable/disable (updates tracked state for pipeline creation)
+
+    enableBlend(): void {
+        this._blendEnabled = true;
+    }
+
+    disableBlend(): void {
+        this._blendEnabled = false;
+    }
+
+    enableDepthTest(): void {
+        this._depthTestEnabled = true;
+    }
+
+    disableDepthTest(): void {
+        this._depthTestEnabled = false;
+    }
+
+    enableStencilTest(): void {
+        this._stencilTestEnabled = true;
+    }
+
+    disableStencilTest(): void {
+        this._stencilTestEnabled = false;
+    }
+
+    enableCullFace(): void {
+        this._cullFaceEnabled = true;
+    }
+
+    disableCullFace(): void {
+        this._cullFaceEnabled = false;
+    }
+
+    enableScissorTest(): void {
+        // WebGPU always uses scissor rects in render pass
+    }
+
+    disableScissorTest(): void {
+        // WebGPU always uses scissor rects in render pass
+    }
+
+    enablePolygonOffsetFill(): void {
+        // WebGPU handles this via depthBias in pipeline descriptor
+    }
+
+    disablePolygonOffsetFill(): void {
+        // WebGPU handles this via depthBias in pipeline descriptor
+    }
+
+    // Blend state
+
+    blendFunc(src: BlendFactor, dst: BlendFactor): void {
+        this._blendSrcRGB = this._blendSrcAlpha = src;
+        this._blendDstRGB = this._blendDstAlpha = dst;
+    }
+
+    blendFuncSeparate(srcRGB: BlendFactor, dstRGB: BlendFactor, srcAlpha: BlendFactor, dstAlpha: BlendFactor): void {
+        this._blendSrcRGB = srcRGB;
+        this._blendDstRGB = dstRGB;
+        this._blendSrcAlpha = srcAlpha;
+        this._blendDstAlpha = dstAlpha;
+    }
+
+    blendEquation(mode: BlendOperation): void {
+        this._blendOpRGB = this._blendOpAlpha = mode;
+    }
+
+    blendEquationSeparate(modeRGB: BlendOperation, modeAlpha: BlendOperation): void {
+        this._blendOpRGB = modeRGB;
+        this._blendOpAlpha = modeAlpha;
+    }
+
+    blendColor(_red: number, _green: number, _blue: number, _alpha: number): void {
+        // WebGPU sets blend constant via setBlendConstant on render pass encoder
+    }
+
+    // Depth state
+
+    depthMask(flag: boolean): void {
+        this._depthWriteEnabled = flag;
+    }
+
+    depthFunc(func: CompareFunction): void {
+        this._depthCompare = func;
+    }
+
+    clearDepth(_depth: number): void {
+        // WebGPU sets clear depth in render pass descriptor
+    }
+
+    // Stencil state
+
+    stencilFunc(_func: CompareFunction, _ref: number, _mask: number): void {
+        // WebGPU stencil is configured in pipeline descriptor
+    }
+
+    stencilFuncSeparate(_face: 'front' | 'back' | 'front-and-back', _func: CompareFunction, _ref: number, _mask: number): void {
+        // WebGPU stencil is configured in pipeline descriptor
+    }
+
+    stencilMask(_mask: number): void {
+        // WebGPU stencil is configured in pipeline descriptor
+    }
+
+    stencilMaskSeparate(_face: 'front' | 'back' | 'front-and-back', _mask: number): void {
+        // WebGPU stencil is configured in pipeline descriptor
+    }
+
+    stencilOp(_fail: StencilOperation, _zfail: StencilOperation, _zpass: StencilOperation): void {
+        // WebGPU stencil is configured in pipeline descriptor
+    }
+
+    stencilOpSeparate(_face: 'front' | 'back' | 'front-and-back', _fail: StencilOperation, _zfail: StencilOperation, _zpass: StencilOperation): void {
+        // WebGPU stencil is configured in pipeline descriptor
+    }
+
+    // Rasterization state
+
+    frontFace(mode: FrontFace): void {
+        this._frontFace = mode;
+    }
+
+    cullFace(mode: CullMode): void {
+        this._cullMode = mode;
+        if (mode === 'none') {
+            this._cullFaceEnabled = false;
+        }
+    }
+
+    polygonOffset(_factor: number, _units: number): void {
+        // WebGPU handles this via depthBias in pipeline descriptor
+    }
+
+    // Color state
+
+    colorMask(_red: boolean, _green: boolean, _blue: boolean, _alpha: boolean): void {
+        // WebGPU color mask is part of pipeline color target state
+    }
+
+    clearColor(_red: number, _green: number, _blue: number, _alpha: number): void {
+        // WebGPU sets clear color in render pass descriptor
+    }
+
+    // Viewport and scissor (these ARE dynamic in WebGPU)
+
+    viewport(x: number, y: number, width: number, height: number): void {
+        this._viewport = [x, y, width, height];
+    }
+
+    scissor(x: number, y: number, width: number, height: number): void {
+        this._scissor = [x, y, width, height];
+    }
+
+    // Vertex attribute state (compatibility layer)
+
+    enableVertexAttrib(index: number): void {
+        this._enabledVertexAttribs.add(index);
+    }
+
+    clearVertexAttribsState(): void {
+        this._enabledVertexAttribs.clear();
+    }
+
+    disableUnusedVertexAttribs(): void {
+        // In WebGPU, vertex attributes are defined by the pipeline layout
+        // No runtime enable/disable
+    }
+
+    // State snapshot (for pipeline key generation)
+
+    getBlendState(): BlendState | null {
+        if (!this._blendEnabled) return null;
+
+        return {
+            color: {
+                operation: this._blendOpRGB,
+                srcFactor: this._blendSrcRGB,
+                dstFactor: this._blendDstRGB,
+            },
+            alpha: {
+                operation: this._blendOpAlpha,
+                srcFactor: this._blendSrcAlpha,
+                dstFactor: this._blendDstAlpha,
+            },
+        };
+    }
+
+    getDepthStencilState(): DepthStencilStateDescriptor | null {
+        if (!this._depthTestEnabled) return null;
+
+        return {
+            depthWriteEnabled: this._depthWriteEnabled,
+            depthCompare: this._depthCompare,
+        };
+    }
+
+    getCullMode(): CullMode {
+        return this._cullFaceEnabled ? this._cullMode : 'none';
+    }
+
+    getFrontFace(): FrontFace {
+        return this._frontFace;
+    }
+
+    isBlendEnabled(): boolean {
+        return this._blendEnabled;
+    }
+
+    isDepthTestEnabled(): boolean {
+        return this._depthTestEnabled;
+    }
+
+    isStencilTestEnabled(): boolean {
+        return this._stencilTestEnabled;
+    }
+
+    // Get current viewport (for render pass encoder)
+    getViewport(): [number, number, number, number] {
+        return this._viewport;
+    }
+
+    // Get current scissor (for render pass encoder)
+    getScissor(): [number, number, number, number] {
+        return this._scissor;
+    }
+
+    // Reset state
+
+    reset(): void {
+        this.currentProgramId = -1;
+        this.currentMaterialId = -1;
+        this.currentRenderItemId = -1;
+
+        this._blendEnabled = false;
+        this._depthTestEnabled = false;
+        this._stencilTestEnabled = false;
+        this._cullFaceEnabled = false;
+        this._cullMode = 'back';
+        this._frontFace = 'ccw';
+
+        this._blendSrcRGB = this._blendSrcAlpha = 'one';
+        this._blendDstRGB = this._blendDstAlpha = 'zero';
+        this._blendOpRGB = this._blendOpAlpha = 'add';
+
+        this._depthWriteEnabled = true;
+        this._depthCompare = 'less';
+
+        this._viewport = [0, 0, 0, 0];
+        this._scissor = [0, 0, 0, 0];
+
+        this._enabledVertexAttribs.clear();
     }
 }

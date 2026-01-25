@@ -8,6 +8,7 @@ import { DrawPass } from './draw';
 import { PickPass } from './pick';
 import { MultiSamplePass } from './multi-sample';
 import { WebGLContext } from '../../mol-gl/webgl/context';
+import { GPUContext, isWebGLBackedContext } from '../../mol-gl/gpu/context';
 import { AssetManager } from '../../mol-util/assets';
 import { IlluminationPass } from './illumination';
 
@@ -16,6 +17,18 @@ export class Passes {
     readonly pick: PickPass;
     readonly multiSample: MultiSamplePass;
     readonly illumination: IlluminationPass;
+
+    /**
+     * Create Passes from a GPUContext.
+     * Currently requires a WebGL-backed context.
+     * @deprecated Use constructor with WebGLContext directly for now.
+     */
+    static fromGPUContext(gpuCtx: GPUContext, assetManager: AssetManager, attribs: Partial<{ pickScale: number, transparency: 'wboit' | 'dpoit' | 'blended' }> = {}): Passes {
+        if (!isWebGLBackedContext(gpuCtx)) {
+            throw new Error('Passes currently only supports WebGL-backed GPUContext. WebGPU native passes are in progress.');
+        }
+        return new Passes(gpuCtx.getWebGLContext(), assetManager, attribs);
+    }
 
     constructor(private webgl: WebGLContext, assetManager: AssetManager, attribs: Partial<{ pickScale: number, transparency: 'wboit' | 'dpoit' | 'blended' }> = {}) {
         const drs = this.webgl.getDrawingBufferSize();

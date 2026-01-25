@@ -1,6 +1,6 @@
 ## 13. Implementation Progress Report
 
-**Last Updated:** 2026-01-24
+**Last Updated:** 2026-01-25
 
 ### 13.1 Phase 1 Status: ✅ COMPLETE
 
@@ -11,13 +11,14 @@ The foundation layer has been implemented. All files compile without errors.
 | File | Status | Description |
 |------|--------|-------------|
 | `index.ts` | ✅ | Module exports |
-| `context.ts` | ✅ | `GPUContext` interface, `GPULimits`, `GPUStats`, backend detection utilities |
+| `context.ts` | ✅ | `GPUContext` interface, `GPULimits`, `GPUStats`, backend detection utilities, `RenderState` property |
 | `context-factory.ts` | ✅ | `createGPUContext()` factory, `getAvailableBackends()`, `getBackendSupportInfo()`, `getBackendFeatures()` |
 | `buffer.ts` | ✅ | `Buffer` interface, `BufferDescriptor`, usage types, data types |
 | `texture.ts` | ✅ | `Texture`, `TextureView`, `Sampler` interfaces with all format types |
 | `bind-group.ts` | ✅ | `BindGroup`, `BindGroupLayout`, `PipelineLayout` interfaces |
 | `pipeline.ts` | ✅ | `RenderPipeline`, `ComputePipeline`, `ShaderModule` interfaces, all state types |
 | `render-pass.ts` | ✅ | `CommandEncoder`, `RenderPassEncoder`, `ComputePassEncoder` interfaces |
+| `render-state.ts` | ✅ | `RenderState` interface - abstract render state management for blend, depth, stencil, rasterization, viewport, scissor |
 
 #### WebGPU Backend (`src/mol-gl/webgpu/`)
 
@@ -213,8 +214,11 @@ All renderables for Phase 4 have been ported:
 - [x] Update WebGPU context with new interface members
 - [x] Canvas3D compatibility layer (`context-compat.ts`) with async context creation
 - [x] WebGLBackedGPUContext interface for backward compatibility
-- [ ] Update Renderer to use GPUContext
-- [ ] Update Passes to use GPUContext
+- [x] Add `RenderState` interface to GPUContext (`render-state.ts`)
+- [x] Implement `RenderState` in WebGL adapter (`WebGLAdapterRenderState`)
+- [x] Implement `RenderState` in WebGPU context (`WebGPURenderState`)
+- [x] Update Renderer with `createFromGPUContext()` factory method
+- [x] Update Passes with `fromGPUContext()` static factory method
 - [ ] Add backend toggle to viewer settings
 - [x] WebGPU test examples (`src/examples/webgpu-*/`) - Basic, mesh, and unified tests
 - [ ] Visual regression tests
@@ -269,9 +273,9 @@ Test examples have been organized into separate directories in `src/examples/`:
 | 3. Pipeline System | ✅ Complete | 100% |
 | 4. Renderables | ✅ Complete | 100% |
 | 5. Advanced Features | ✅ Complete | ~95% |
-| 6. Integration | 🟡 In Progress | ~60% |
+| 6. Integration | 🟡 In Progress | ~75% |
 
-**Overall Progress:** ~93%
+**Overall Progress:** ~95%
 
 **Completed Work:**
 - ✅ WebGL adapter for GPUContext interface
@@ -279,14 +283,20 @@ Test examples have been organized into separate directories in `src/examples/`:
 - ✅ GPUContext interface extensions for Canvas3D (render targets, caches, utilities)
 - ✅ Render target abstraction (RenderTarget interface)
 - ✅ Test examples demonstrating both backends
+- ✅ RenderState interface for abstract render state management
+- ✅ RenderState implementations for WebGL and WebGPU
+- ✅ Renderer.createFromGPUContext() factory method
+- ✅ Passes.fromGPUContext() static factory method
 
 **Remaining Critical Work:**
 1. ✅ Canvas3D integration with async context creation (added `context-compat.ts` compatibility layer)
-2. Update Renderer to use GPUContext instead of WebGLContext
-3. Update all rendering Passes to use GPUContext
-4. Compute shader ports (histogram pyramid, marching cubes)
-5. Visual regression tests
-6. Performance benchmarks
+2. ✅ Add RenderState to GPUContext (enables abstract render state management)
+3. ✅ Update Renderer with GPUContext factory method
+4. ✅ Update Passes with GPUContext factory method
+5. Add backend toggle to viewer settings
+6. Compute shader ports (histogram pyramid, marching cubes)
+7. Visual regression tests
+8. Performance benchmarks
 
 ### 13.9 WebGL Adapter Implementation
 
@@ -371,3 +381,60 @@ const scene = Scene.create(ctx.webgl, transparency);
 ```
 
 This compatibility layer allows gradual migration from WebGLContext to GPUContext without breaking existing code.
+
+### 13.12 RenderState Interface
+
+The `RenderState` interface (`src/mol-gl/gpu/render-state.ts`) provides abstract render state management that works with both WebGL and WebGPU:
+
+| Method Category | Methods | Description |
+|----------------|---------|-------------|
+| Feature Toggle | `enableBlend/disableBlend`, `enableDepthTest/disableDepthTest`, `enableCullFace/disableCullFace`, etc. | Toggle render features |
+| Blend State | `blendFunc`, `blendFuncSeparate`, `blendEquation`, `blendEquationSeparate`, `blendColor` | Configure blending |
+| Depth State | `depthMask`, `depthFunc`, `clearDepth` | Configure depth testing |
+| Stencil State | `stencilFunc`, `stencilMask`, `stencilOp`, with `Separate` variants | Configure stencil testing |
+| Rasterization | `frontFace`, `cullFace`, `polygonOffset` | Configure rasterization |
+| Color State | `colorMask`, `clearColor` | Configure color output |
+| Viewport/Scissor | `viewport`, `scissor` | Set viewport and scissor rectangles |
+| State Queries | `getBlendState`, `getDepthStencilState`, `getCullMode`, `getFrontFace`, `isBlendEnabled`, etc. | Query current state for pipeline creation |
+
+**Implementation Notes:**
+- **WebGL (`WebGLAdapterRenderState`)**: Wraps `WebGLState`, applies changes immediately to WebGL state machine
+- **WebGPU (`WebGPURenderState`)**: Tracks desired state for pipeline creation; actual state is baked into immutable pipelines
+
+**Usage Example:**
+```typescript
+// Works with both WebGL and WebGPU contexts
+ctx.state.enableBlend();
+ctx.state.blendFunc('src-alpha', 'one-minus-src-alpha');
+ctx.state.enableDepthTest();
+ctx.state.depthFunc('less-equal');
+ctx.state.viewport(0, 0, width, height);
+
+// Query state for pipeline creation (WebGPU)
+const blendState = ctx.state.getBlendState();
+const depthState = ctx.state.getDepthStencilState();
+```
+
+### 13.13 Renderer and Passes GPUContext Support
+
+Factory methods have been added to support GPUContext:
+
+**Renderer (`src/mol-gl/renderer.ts`):**
+```typescript
+// New factory method for GPUContext
+const renderer = Renderer.createFromGPUContext(gpuContext, props);
+
+// Original method still works for WebGLContext
+const renderer = Renderer.create(webglContext, props);
+```
+
+**Passes (`src/mol-canvas3d/passes/passes.ts`):**
+```typescript
+// New static factory for GPUContext
+const passes = Passes.fromGPUContext(gpuContext, assetManager, attribs);
+
+// Original constructor still works for WebGLContext
+const passes = new Passes(webglContext, assetManager, attribs);
+```
+
+**Note:** Both factory methods currently require WebGL-backed GPUContext. Native WebGPU rendering will be enabled as the migration progresses.

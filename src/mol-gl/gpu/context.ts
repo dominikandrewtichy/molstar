@@ -11,6 +11,7 @@ import { Texture, TextureDescriptor, TextureView, TextureViewDescriptor, Sampler
 import { BindGroup, BindGroupDescriptor, BindGroupLayout, BindGroupLayoutDescriptor, PipelineLayout, PipelineLayoutDescriptor } from './bind-group';
 import { RenderPipeline, RenderPipelineDescriptor, ComputePipeline, ComputePipelineDescriptor, ShaderModule, ShaderModuleDescriptor } from './pipeline';
 import { CommandEncoder, CommandBuffer, RenderPassDescriptor, RenderPassEncoder, ComputePassEncoder, RenderTarget, RenderTargetOptions } from './render-pass';
+import { RenderState } from './render-state';
 
 export type GPUBackend = 'webgl' | 'webgpu';
 
@@ -65,6 +66,13 @@ export interface GPUContext {
     readonly preferredFormat: TextureFormat;
     /** Whether this is a WebGL2 or WebGPU context (both support modern features) */
     readonly isModernContext: boolean;
+
+    /**
+     * Render state management.
+     * In WebGL: applies state changes immediately via the WebGL state machine.
+     * In WebGPU: accumulates state for pipeline creation/selection.
+     */
+    readonly state: RenderState;
 
     // Resource creation
     createBuffer(descriptor: BufferDescriptor): Buffer;

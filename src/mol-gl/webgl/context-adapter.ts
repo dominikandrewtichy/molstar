@@ -74,6 +74,24 @@ import { GLRenderingContext, isWebGL2 } from './compat';
 import { getGLContext } from './context';
 import { createExtensions, WebGLExtensions } from './extensions';
 import { createState, WebGLState } from './state';
+import {
+    RenderState,
+    DepthStencilStateDescriptor,
+    blendFactorToGL,
+    blendOperationToGL,
+    compareFunctionToGL,
+    stencilOperationToGL,
+    faceToGL,
+} from '../gpu/render-state';
+import {
+    BlendFactor,
+    BlendOperation,
+    BlendState,
+    CullMode,
+    FrontFace,
+    StencilOperation,
+} from '../gpu/pipeline';
+import { CompareFunction } from '../gpu/texture';
 
 /**
  * WebGL-specific context options.
@@ -116,10 +134,11 @@ class WebGLAdapterContext implements WebGLBackedGPUContext {
     readonly contextRestored: Subject<now.Timestamp>;
     readonly namedTextures: { [name: string]: Texture } = Object.create(null);
     readonly namedRenderTargets: { [name: string]: RenderTarget } = Object.create(null);
+    readonly state: RenderState;
 
     private _gl: GLRenderingContext;
     private _extensions: WebGLExtensions;
-    private _state: WebGLState;
+    private _webglState: WebGLState;
     private _pixelScale: number;
     private _isContextLost: boolean = false;
     private _currentTexture: WebGLAdapterTexture | null = null;
@@ -136,7 +155,8 @@ class WebGLAdapterContext implements WebGLBackedGPUContext {
         this._pixelScale = pixelScale ?? 1;
 
         this._extensions = createExtensions(gl);
-        this._state = createState(gl, this._extensions);
+        this._webglState = createState(gl, this._extensions);
+        this.state = new WebGLAdapterRenderState(gl, this._webglState);
         this.limits = this._createLimits();
         this.stats = createGPUStats();
         this.contextRestored = new Subject<now.Timestamp>();
@@ -181,8 +201,12 @@ class WebGLAdapterContext implements WebGLBackedGPUContext {
         return this._extensions;
     }
 
-    get state(): WebGLState {
-        return this._state;
+    /**
+     * Get the underlying WebGLState for internal use.
+     * @deprecated Use GPUContext.state methods instead.
+     */
+    get webglState(): WebGLState {
+        return this._webglState;
     }
 
     get preferredFormat(): TextureFormat {
@@ -198,7 +222,7 @@ class WebGLAdapterContext implements WebGLBackedGPUContext {
     }
 
     handleContextRestored(extraResets?: () => void): void {
-        this._state.reset();
+        this._webglState.reset();
         // Forward to WebGLContext if it exists
         if (this._webglContext) {
             this._webglContext.handleContextRestored(extraResets);
@@ -319,7 +343,7 @@ class WebGLAdapterContext implements WebGLBackedGPUContext {
     // Command encoding
 
     createCommandEncoder(): CommandEncoder {
-        return new WebGLAdapterCommandEncoder(this._gl, this._state, this._extensions, this.stats);
+        return new WebGLAdapterCommandEncoder(this._gl, this._webglState, this._extensions, this.stats);
     }
 
     submit(commandBuffers: CommandBuffer[]): void {
@@ -381,12 +405,12 @@ class WebGLAdapterContext implements WebGLBackedGPUContext {
         const gl = this._gl;
         const drs = this.getDrawingBufferSize();
         this.bindDrawingBuffer();
-        this._state.enable(gl.SCISSOR_TEST);
-        this._state.depthMask(true);
-        this._state.colorMask(true, true, true, true);
-        this._state.clearColor(red, green, blue, alpha);
-        this._state.viewport(0, 0, drs.width, drs.height);
-        this._state.scissor(0, 0, drs.width, drs.height);
+        this._webglState.enable(gl.SCISSOR_TEST);
+        this._webglState.depthMask(true);
+        this._webglState.colorMask(true, true, true, true);
+        this._webglState.clearColor(red, green, blue, alpha);
+        this._webglState.viewport(0, 0, drs.width, drs.height);
+        this._webglState.scissor(0, 0, drs.width, drs.height);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     }
 
@@ -2020,5 +2044,347 @@ class WebGLAdapterDrawTarget implements RenderTarget {
 
     destroy(): void {
         // Drawing buffer is managed by the browser
+    }
+}
+
+/**
+ * WebGL implementation of RenderState interface.
+ * Wraps the existing WebGLState to provide abstract state management.
+ */
+class WebGLAdapterRenderState implements RenderState {
+    currentProgramId: number = -1;
+    currentMaterialId: number = -1;
+    currentRenderItemId: number = -1;
+
+    private _gl: GLRenderingContext;
+    private _webglState: WebGLState;
+
+    // Track current state for getters
+    private _blendEnabled = false;
+    private _depthTestEnabled = false;
+    private _stencilTestEnabled = false;
+    private _cullFaceEnabled = false;
+    private _scissorTestEnabled = false;
+    private _polygonOffsetFillEnabled = false;
+    private _cullMode: CullMode = 'back';
+    private _frontFace: FrontFace = 'ccw';
+
+    // Blend state tracking
+    private _blendSrcRGB: BlendFactor = 'one';
+    private _blendDstRGB: BlendFactor = 'zero';
+    private _blendSrcAlpha: BlendFactor = 'one';
+    private _blendDstAlpha: BlendFactor = 'zero';
+    private _blendOpRGB: BlendOperation = 'add';
+    private _blendOpAlpha: BlendOperation = 'add';
+
+    // Depth state tracking
+    private _depthWriteEnabled = true;
+    private _depthCompare: CompareFunction = 'less';
+
+    constructor(gl: GLRenderingContext, state: WebGLState) {
+        this._gl = gl;
+        this._webglState = state;
+
+        // Sync current IDs
+        this.currentProgramId = state.currentProgramId;
+        this.currentMaterialId = state.currentMaterialId;
+        this.currentRenderItemId = state.currentRenderItemId;
+    }
+
+    // Feature enable/disable
+
+    enableBlend(): void {
+        this._webglState.enable(this._gl.BLEND);
+        this._blendEnabled = true;
+    }
+
+    disableBlend(): void {
+        this._webglState.disable(this._gl.BLEND);
+        this._blendEnabled = false;
+    }
+
+    enableDepthTest(): void {
+        this._webglState.enable(this._gl.DEPTH_TEST);
+        this._depthTestEnabled = true;
+    }
+
+    disableDepthTest(): void {
+        this._webglState.disable(this._gl.DEPTH_TEST);
+        this._depthTestEnabled = false;
+    }
+
+    enableStencilTest(): void {
+        this._webglState.enable(this._gl.STENCIL_TEST);
+        this._stencilTestEnabled = true;
+    }
+
+    disableStencilTest(): void {
+        this._webglState.disable(this._gl.STENCIL_TEST);
+        this._stencilTestEnabled = false;
+    }
+
+    enableCullFace(): void {
+        this._webglState.enable(this._gl.CULL_FACE);
+        this._cullFaceEnabled = true;
+    }
+
+    disableCullFace(): void {
+        this._webglState.disable(this._gl.CULL_FACE);
+        this._cullFaceEnabled = false;
+    }
+
+    enableScissorTest(): void {
+        this._webglState.enable(this._gl.SCISSOR_TEST);
+        this._scissorTestEnabled = true;
+    }
+
+    disableScissorTest(): void {
+        this._webglState.disable(this._gl.SCISSOR_TEST);
+        this._scissorTestEnabled = false;
+    }
+
+    enablePolygonOffsetFill(): void {
+        this._webglState.enable(this._gl.POLYGON_OFFSET_FILL);
+        this._polygonOffsetFillEnabled = true;
+    }
+
+    disablePolygonOffsetFill(): void {
+        this._webglState.disable(this._gl.POLYGON_OFFSET_FILL);
+        this._polygonOffsetFillEnabled = false;
+    }
+
+    // Blend state
+
+    blendFunc(src: BlendFactor, dst: BlendFactor): void {
+        const gl = this._gl;
+        this._webglState.blendFunc(blendFactorToGL(gl, src), blendFactorToGL(gl, dst));
+        this._blendSrcRGB = this._blendSrcAlpha = src;
+        this._blendDstRGB = this._blendDstAlpha = dst;
+    }
+
+    blendFuncSeparate(srcRGB: BlendFactor, dstRGB: BlendFactor, srcAlpha: BlendFactor, dstAlpha: BlendFactor): void {
+        const gl = this._gl;
+        this._webglState.blendFuncSeparate(
+            blendFactorToGL(gl, srcRGB),
+            blendFactorToGL(gl, dstRGB),
+            blendFactorToGL(gl, srcAlpha),
+            blendFactorToGL(gl, dstAlpha)
+        );
+        this._blendSrcRGB = srcRGB;
+        this._blendDstRGB = dstRGB;
+        this._blendSrcAlpha = srcAlpha;
+        this._blendDstAlpha = dstAlpha;
+    }
+
+    blendEquation(mode: BlendOperation): void {
+        const gl = this._gl;
+        this._webglState.blendEquation(blendOperationToGL(gl, mode));
+        this._blendOpRGB = this._blendOpAlpha = mode;
+    }
+
+    blendEquationSeparate(modeRGB: BlendOperation, modeAlpha: BlendOperation): void {
+        const gl = this._gl;
+        this._webglState.blendEquationSeparate(blendOperationToGL(gl, modeRGB), blendOperationToGL(gl, modeAlpha));
+        this._blendOpRGB = modeRGB;
+        this._blendOpAlpha = modeAlpha;
+    }
+
+    blendColor(red: number, green: number, blue: number, alpha: number): void {
+        this._webglState.blendColor(red, green, blue, alpha);
+    }
+
+    // Depth state
+
+    depthMask(flag: boolean): void {
+        this._webglState.depthMask(flag);
+        this._depthWriteEnabled = flag;
+    }
+
+    depthFunc(func: CompareFunction): void {
+        const gl = this._gl;
+        this._webglState.depthFunc(compareFunctionToGL(gl, func));
+        this._depthCompare = func;
+    }
+
+    clearDepth(depth: number): void {
+        this._webglState.clearDepth(depth);
+    }
+
+    // Stencil state
+
+    stencilFunc(func: CompareFunction, ref: number, mask: number): void {
+        const gl = this._gl;
+        this._webglState.stencilFunc(compareFunctionToGL(gl, func), ref, mask);
+    }
+
+    stencilFuncSeparate(face: 'front' | 'back' | 'front-and-back', func: CompareFunction, ref: number, mask: number): void {
+        const gl = this._gl;
+        this._webglState.stencilFuncSeparate(faceToGL(gl, face), compareFunctionToGL(gl, func), ref, mask);
+    }
+
+    stencilMask(mask: number): void {
+        this._webglState.stencilMask(mask);
+    }
+
+    stencilMaskSeparate(face: 'front' | 'back' | 'front-and-back', mask: number): void {
+        const gl = this._gl;
+        this._webglState.stencilMaskSeparate(faceToGL(gl, face), mask);
+    }
+
+    stencilOp(fail: StencilOperation, zfail: StencilOperation, zpass: StencilOperation): void {
+        const gl = this._gl;
+        this._webglState.stencilOp(
+            stencilOperationToGL(gl, fail),
+            stencilOperationToGL(gl, zfail),
+            stencilOperationToGL(gl, zpass)
+        );
+    }
+
+    stencilOpSeparate(face: 'front' | 'back' | 'front-and-back', fail: StencilOperation, zfail: StencilOperation, zpass: StencilOperation): void {
+        const gl = this._gl;
+        this._webglState.stencilOpSeparate(
+            faceToGL(gl, face),
+            stencilOperationToGL(gl, fail),
+            stencilOperationToGL(gl, zfail),
+            stencilOperationToGL(gl, zpass)
+        );
+    }
+
+    // Rasterization state
+
+    frontFace(mode: FrontFace): void {
+        const gl = this._gl;
+        this._webglState.frontFace(mode === 'ccw' ? gl.CCW : gl.CW);
+        this._frontFace = mode;
+    }
+
+    cullFace(mode: CullMode): void {
+        const gl = this._gl;
+        if (mode === 'none') {
+            this.disableCullFace();
+        } else {
+            this._webglState.cullFace(mode === 'front' ? gl.FRONT : gl.BACK);
+        }
+        this._cullMode = mode;
+    }
+
+    polygonOffset(factor: number, units: number): void {
+        this._gl.polygonOffset(factor, units);
+    }
+
+    // Color state
+
+    colorMask(red: boolean, green: boolean, blue: boolean, alpha: boolean): void {
+        this._webglState.colorMask(red, green, blue, alpha);
+    }
+
+    clearColor(red: number, green: number, blue: number, alpha: number): void {
+        this._webglState.clearColor(red, green, blue, alpha);
+    }
+
+    // Viewport and scissor
+
+    viewport(x: number, y: number, width: number, height: number): void {
+        this._webglState.viewport(x, y, width, height);
+    }
+
+    scissor(x: number, y: number, width: number, height: number): void {
+        this._webglState.scissor(x, y, width, height);
+    }
+
+    // Vertex attribute state
+
+    enableVertexAttrib(index: number): void {
+        this._webglState.enableVertexAttrib(index);
+    }
+
+    clearVertexAttribsState(): void {
+        this._webglState.clearVertexAttribsState();
+    }
+
+    disableUnusedVertexAttribs(): void {
+        this._webglState.disableUnusedVertexAttribs();
+    }
+
+    // State snapshot (for WebGPU pipeline key generation)
+
+    getBlendState(): BlendState | null {
+        if (!this._blendEnabled) return null;
+
+        return {
+            color: {
+                operation: this._blendOpRGB,
+                srcFactor: this._blendSrcRGB,
+                dstFactor: this._blendDstRGB,
+            },
+            alpha: {
+                operation: this._blendOpAlpha,
+                srcFactor: this._blendSrcAlpha,
+                dstFactor: this._blendDstAlpha,
+            },
+        };
+    }
+
+    getDepthStencilState(): DepthStencilStateDescriptor | null {
+        if (!this._depthTestEnabled) return null;
+
+        return {
+            depthWriteEnabled: this._depthWriteEnabled,
+            depthCompare: this._depthCompare,
+        };
+    }
+
+    getCullMode(): CullMode {
+        return this._cullFaceEnabled ? this._cullMode : 'none';
+    }
+
+    getFrontFace(): FrontFace {
+        return this._frontFace;
+    }
+
+    isBlendEnabled(): boolean {
+        return this._blendEnabled;
+    }
+
+    isDepthTestEnabled(): boolean {
+        return this._depthTestEnabled;
+    }
+
+    isStencilTestEnabled(): boolean {
+        return this._stencilTestEnabled;
+    }
+
+    isScissorTestEnabled(): boolean {
+        return this._scissorTestEnabled;
+    }
+
+    isPolygonOffsetFillEnabled(): boolean {
+        return this._polygonOffsetFillEnabled;
+    }
+
+    // Reset state
+
+    reset(): void {
+        this._webglState.reset();
+
+        this.currentProgramId = -1;
+        this.currentMaterialId = -1;
+        this.currentRenderItemId = -1;
+
+        this._blendEnabled = false;
+        this._depthTestEnabled = false;
+        this._stencilTestEnabled = false;
+        this._cullFaceEnabled = false;
+        this._scissorTestEnabled = false;
+        this._polygonOffsetFillEnabled = false;
+        this._cullMode = 'back';
+        this._frontFace = 'ccw';
+
+        this._blendSrcRGB = this._blendSrcAlpha = 'one';
+        this._blendDstRGB = this._blendDstAlpha = 'zero';
+        this._blendOpRGB = this._blendOpAlpha = 'add';
+
+        this._depthWriteEnabled = true;
+        this._depthCompare = 'less';
     }
 }

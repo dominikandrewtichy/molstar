@@ -9,6 +9,7 @@ import { Viewport } from '../mol-canvas3d/camera/util';
 import { ICamera } from '../mol-canvas3d/camera';
 import { Scene } from './scene';
 import { WebGLContext } from './webgl/context';
+import { GPUContext, isWebGLBackedContext } from './gpu/context';
 import { Mat4, Vec3, Vec4, Vec2 } from '../mol-math/linear-algebra';
 import { GraphicsRenderable } from './renderable';
 import { Color } from '../mol-util/color';
@@ -169,6 +170,18 @@ namespace Renderer {
         All = 0,
         Opaque = 1,
         Transparent = 2,
+    }
+
+    /**
+     * Create a Renderer from a GPUContext.
+     * Currently requires a WebGL-backed context (uses getWebGLContext internally).
+     * @deprecated Use create(webglContext) directly for now. This will be updated to work with WebGPU.
+     */
+    export function createFromGPUContext(gpuCtx: GPUContext, props: Partial<RendererProps> = {}): Renderer {
+        if (!isWebGLBackedContext(gpuCtx)) {
+            throw new Error('Renderer currently only supports WebGL-backed GPUContext. WebGPU native rendering is in progress.');
+        }
+        return create(gpuCtx.getWebGLContext(), props);
     }
 
     export function create(ctx: WebGLContext, props: Partial<RendererProps> = {}): Renderer {
