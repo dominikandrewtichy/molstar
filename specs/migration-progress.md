@@ -93,16 +93,20 @@ src/mol-gl/
 │   ├── pipeline-cache.ts          # Pipeline caching system
 │   ├── renderable.ts              # WebGPU renderable base class
 │   ├── webgpu-types.d.ts          # TypeScript type declarations
-│   └── renderable/                # Concrete renderable implementations
+│   ├── renderable/                # Concrete renderable implementations
+│   │   ├── index.ts
+│   │   ├── mesh.ts                # WebGPU mesh renderable
+│   │   ├── spheres.ts             # WebGPU spheres renderable (ray-cast)
+│   │   ├── cylinders.ts           # WebGPU cylinders renderable (ray-cast)
+│   │   ├── points.ts              # WebGPU points renderable
+│   │   ├── lines.ts               # WebGPU lines renderable
+│   │   ├── text.ts                # WebGPU text renderable (SDF)
+│   │   ├── image.ts               # WebGPU image renderable
+│   │   └── direct-volume.ts       # WebGPU direct volume renderable
+│   └── compute/                   # NEW: WebGPU compute pipelines
 │       ├── index.ts
-│       ├── mesh.ts                # WebGPU mesh renderable
-│       ├── spheres.ts             # WebGPU spheres renderable (ray-cast)
-│       ├── cylinders.ts           # WebGPU cylinders renderable (ray-cast)
-│       ├── points.ts              # WebGPU points renderable
-│       ├── lines.ts               # WebGPU lines renderable
-│       ├── text.ts                # WebGPU text renderable (SDF)
-│       ├── image.ts               # WebGPU image renderable
-│       └── direct-volume.ts       # WebGPU direct volume renderable
+│       ├── histogram-pyramid.ts   # Histogram pyramid builder (~200 lines)
+│       └── marching-cubes.ts      # Marching cubes isosurface extraction (~350 lines)
 └── shader/
     └── wgsl/                      # NEW: WGSL shaders
         ├── index.ts
@@ -115,18 +119,23 @@ src/mol-gl/
         ├── text.wgsl.ts           # SDF text rendering
         ├── image.wgsl.ts          # Image texture rendering
         ├── direct-volume.wgsl.ts  # Raymarching volume rendering
-        └── chunks/
-            ├── common.wgsl.ts         # Common utilities (math, packing, color space)
-            ├── uniforms.wgsl.ts       # Uniform buffer structs
-            ├── read-from-texture.wgsl.ts  # Texture sampling utilities
-            ├── lighting.wgsl.ts       # PBR lighting functions
-            ├── fog.wgsl.ts            # Fog calculations
-            ├── transparency.wgsl.ts   # WBOIT and DPOIT implementations
-            ├── color.wgsl.ts          # Color assignment utilities
-            ├── marker.wgsl.ts         # Highlight/selection markers
-            ├── clipping.wgsl.ts       # Clipping planes and objects
-            ├── size.wgsl.ts           # Size assignment and LOD
-            └── interior.wgsl.ts       # Interior coloring and x-ray
+        ├── chunks/
+        │   ├── common.wgsl.ts         # Common utilities (math, packing, color space)
+        │   ├── uniforms.wgsl.ts       # Uniform buffer structs
+        │   ├── read-from-texture.wgsl.ts  # Texture sampling utilities
+        │   ├── lighting.wgsl.ts       # PBR lighting functions
+        │   ├── fog.wgsl.ts            # Fog calculations
+        │   ├── transparency.wgsl.ts   # WBOIT and DPOIT implementations
+        │   ├── color.wgsl.ts          # Color assignment utilities
+        │   ├── marker.wgsl.ts         # Highlight/selection markers
+        │   ├── clipping.wgsl.ts       # Clipping planes and objects
+        │   ├── size.wgsl.ts           # Size assignment and LOD
+        │   └── interior.wgsl.ts       # Interior coloring and x-ray
+        └── compute/                   # NEW: Compute shaders
+            ├── index.ts
+            ├── active-voxels.wgsl.ts  # Active voxels for marching cubes (~200 lines)
+            ├── histogram-pyramid.wgsl.ts  # Histogram pyramid reduction (~150 lines)
+            └── isosurface.wgsl.ts     # Isosurface extraction (~450 lines)
 ```
 
 ### 13.4 Phase 2 Progress: Shader System
@@ -202,7 +211,13 @@ All renderables for Phase 4 have been ported:
   - [x] Outlines (`shader/wgsl/outlines.wgsl.ts`) - depth discontinuity edge detection
   - [x] Postprocessing compositor (`shader/wgsl/postprocessing.wgsl.ts`) - combines all effects
 - [x] Picking system (`webgpu/picking.ts`) - MRT picking with async GPU readback
-- [ ] Compute shader ports (histogram pyramid, marching cubes)
+- [x] Compute shader ports:
+  - [x] Active voxels compute shader (`shader/wgsl/compute/active-voxels.wgsl.ts`) - MC voxel classification
+  - [x] Histogram pyramid reduction (`shader/wgsl/compute/histogram-pyramid.wgsl.ts`) - parallel reduction
+  - [x] Histogram pyramid sum (`shader/wgsl/compute/histogram-pyramid.wgsl.ts`) - final count extraction
+  - [x] Isosurface extraction (`shader/wgsl/compute/isosurface.wgsl.ts`) - MC vertex/normal generation
+  - [x] WebGPU compute pipeline (`webgpu/compute/histogram-pyramid.ts`) - histogram pyramid builder
+  - [x] WebGPU compute pipeline (`webgpu/compute/marching-cubes.ts`) - isosurface extraction
 
 #### Phase 6: Integration
 - [x] Create WebGL adapter implementing `GPUContext` interface (`webgl/context-adapter.ts`)
@@ -272,10 +287,10 @@ Test examples have been organized into separate directories in `src/examples/`:
 | 2. Shader System (WGSL) | ✅ Complete | 100% |
 | 3. Pipeline System | ✅ Complete | 100% |
 | 4. Renderables | ✅ Complete | 100% |
-| 5. Advanced Features | ✅ Complete | ~95% |
-| 6. Integration | 🟡 In Progress | ~85% |
+| 5. Advanced Features | ✅ Complete | 100% |
+| 6. Integration | 🟡 In Progress | ~90% |
 
-**Overall Progress:** ~97%
+**Overall Progress:** ~98%
 
 **Completed Work:**
 - ✅ WebGL adapter for GPUContext interface
@@ -288,6 +303,7 @@ Test examples have been organized into separate directories in `src/examples/`:
 - ✅ Renderer.createFromGPUContext() factory method
 - ✅ Passes.fromGPUContext() static factory method
 - ✅ Backend toggle in viewer settings (GPUBackend config in PluginConfig.General, display in SimpleSettings advanced section)
+- ✅ Compute shader ports (histogram pyramid, marching cubes) - WGSL compute shaders and WebGPU compute pipelines
 
 **Remaining Critical Work:**
 1. ✅ Canvas3D integration with async context creation (added `context-compat.ts` compatibility layer)
@@ -295,7 +311,7 @@ Test examples have been organized into separate directories in `src/examples/`:
 3. ✅ Update Renderer with GPUContext factory method
 4. ✅ Update Passes with GPUContext factory method
 5. ✅ Add backend toggle to viewer settings (GPUBackend config + UI display)
-6. Compute shader ports (histogram pyramid, marching cubes)
+6. ✅ Compute shader ports (histogram pyramid, marching cubes)
 7. Visual regression tests
 8. Performance benchmarks
 

@@ -44,3 +44,6 @@ export * from './ssao.wgsl';
 export * from './fxaa.wgsl';
 export * from './bloom.wgsl';
 export * from './outlines.wgsl';
+
+// Shaders - Compute
+export * from './compute/index';
