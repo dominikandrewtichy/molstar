@@ -266,6 +266,7 @@ Test examples have been organized into separate directories in `src/examples/`:
 | `webgpu-basic/` | Basic WebGPU tests: context creation, shader module, buffer/texture creation, simple triangle render |
 | `webgpu-mesh/` | Animated 3D cube with lighting, demonstrates full render pipeline |
 | `webgpu-unified/` | Unified backend test: demonstrates both WebGL and WebGPU working through common GPUContext interface |
+| `webgpu-comparison/` | Visual comparison test: renders the same mesh geometry using both backends side-by-side |
 
 **To run the tests:**
 
@@ -274,6 +275,7 @@ Test examples have been organized into separate directories in `src/examples/`:
    - `http://localhost:5173/examples/webgpu-basic/` - Basic tests
    - `http://localhost:5173/examples/webgpu-mesh/` - Mesh animation
    - `http://localhost:5173/examples/webgpu-unified/` - Unified backend tests
+   - `http://localhost:5173/examples/webgpu-comparison/` - Visual comparison tests
 
 **Requirements:**
 - Chrome 113+ or Firefox with WebGPU enabled
@@ -312,7 +314,7 @@ Test examples have been organized into separate directories in `src/examples/`:
 4. ✅ Update Passes with GPUContext factory method
 5. ✅ Add backend toggle to viewer settings (GPUBackend config + UI display)
 6. ✅ Compute shader ports (histogram pyramid, marching cubes)
-7. Visual regression tests
+7. 🟡 Visual regression tests (comparison test example created, automated testing pending)
 8. Performance benchmarks
 
 ### 13.9 WebGL Adapter Implementation
@@ -455,3 +457,27 @@ const passes = new Passes(webglContext, assetManager, attribs);
 ```
 
 **Note:** Both factory methods currently require WebGL-backed GPUContext. Native WebGPU rendering will be enabled as the migration progresses.
+
+### 13.14 WebGPU Compute Pipelines
+
+The compute shader system has been fully ported to WebGPU with native compute shaders:
+
+#### Histogram Pyramid (`webgpu/compute/histogram-pyramid.ts`)
+- `WebGPUHistogramPyramid` class for building histogram pyramids
+- Multi-pass reduction using compute shaders
+- Async sum extraction for total count
+- Resource caching and lifecycle management
+
+#### Marching Cubes (`webgpu/compute/marching-cubes.ts`)
+- `WebGPUMarchingCubes` class for isosurface extraction
+- Active voxels calculation with 2D texture output (histogram pyramid compatible)
+- Full TriTable lookup data embedded (256 MC cases, up to 15 triangles each)
+- Vertex, normal, and group buffer generation
+- High-level `extractIsosurfaceWebGPU()` function combining all stages
+
+#### WGSL Compute Shaders (`shader/wgsl/compute/`)
+| File | Description |
+|------|-------------|
+| `active-voxels.wgsl.ts` | 3D and 2D active voxel classification |
+| `histogram-pyramid.wgsl.ts` | Reduction, sum, and single-dispatch build variants |
+| `isosurface.wgsl.ts` | MC vertex extraction with storage buffer and texture output variants |

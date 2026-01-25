@@ -36,6 +36,7 @@ const Apps = [
   { kind: "example", name: "webgpu-basic" },
   { kind: "example", name: "webgpu-mesh" },
   { kind: "example", name: "webgpu-unified" },
+  { kind: "example", name: "webgpu-comparison" },
 ];
 
 function findApp(name, kind) {
