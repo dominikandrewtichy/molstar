@@ -8,6 +8,8 @@ export * from './context';
 export * from './pipeline-cache';
 export * from './renderable';
 export * from './renderable/index';
+export * from './renderer';
+export * from './scene';
 // Export transparency module selectively to avoid TransparencyMode conflict
 export { TransparencyPassManager } from './transparency';
 export type {
