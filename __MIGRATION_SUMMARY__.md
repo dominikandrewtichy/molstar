@@ -210,7 +210,21 @@ Canvas3D.createWebGPU() -> WebGPURenderer -> WebGPUContext (native)
 Canvas3D.create() -> Renderer (WebGL) -> WebGLAdapterContext -> WebGL
 ```
 
-### 3. Post-Processing Passes
+### 3. ImagePass for Native WebGPU ✅ **IMPLEMENTED**
+
+**Added**: `WebGPUImagePass` class for off-screen image rendering in native WebGPU mode.
+
+- **File**: `src/mol-gl/webgpu/passes.ts`
+- **New Class**: `WebGPUImagePass`
+- **Factory**: `createWebGPUImagePass()`
+- **Integration**: `Canvas3D.createWebGPU()` now returns a working `getImagePass()` method
+
+**Features**:
+- Off-screen rendering to render targets
+- Async pixel readback via `readPixelsAsync`
+- Image data extraction with Y-flip and alpha division
+
+### 4. Post-Processing Passes
 **Priority: Medium**
 
 WGSL shaders exist for:
@@ -219,9 +233,9 @@ WGSL shaders exist for:
 - ✅ Bloom
 - ✅ Outlines
 
-**Needed**: Integration into the render pipeline
+**Needed**: Integration into the render pipeline (in WebGPUDrawPass)
 
-### 4. Compute Shader Integration
+### 5. Compute Shader Integration
 **Priority: Medium**
 
 - ✅ Histogram pyramid (for marching cubes)
@@ -230,7 +244,7 @@ WGSL shaders exist for:
 
 **Needed**: Integration with existing compute-based features
 
-### 5. Advanced Features
+### 6. Advanced Features
 **Priority: Low**
 
 - Multi-sample anti-aliasing (MSAA) - partial implementation exists

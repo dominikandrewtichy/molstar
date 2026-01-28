@@ -102,7 +102,8 @@ src/mol-gl/
 │   │   ├── lines.ts               # WebGPU lines renderable
 │   │   ├── text.ts                # WebGPU text renderable (SDF)
 │   │   ├── image.ts               # WebGPU image renderable
-│   │   └── direct-volume.ts       # WebGPU direct volume renderable
+│   │   ├── direct-volume.ts       # WebGPU direct volume renderable
+│   │   └── texture-mesh.ts        # WebGPU texture-mesh renderable (texture-based geometry)
 │   └── compute/                   # NEW: WebGPU compute pipelines
 │       ├── index.ts
 │       ├── histogram-pyramid.ts   # Histogram pyramid builder (~200 lines)
@@ -119,6 +120,7 @@ src/mol-gl/
         ├── text.wgsl.ts           # SDF text rendering
         ├── image.wgsl.ts          # Image texture rendering
         ├── direct-volume.wgsl.ts  # Raymarching volume rendering
+        ├── texture-mesh.wgsl.ts   # Texture-based mesh rendering
         ├── chunks/
         │   ├── common.wgsl.ts         # Common utilities (math, packing, color space)
         │   ├── uniforms.wgsl.ts       # Uniform buffer structs
@@ -200,6 +202,7 @@ All renderables for Phase 4 have been ported:
 - ✅ `TextRenderable` (`webgpu/renderable/text.ts`) - ~500 lines, SDF text with border/background
 - ✅ `ImageRenderable` (`webgpu/renderable/image.ts`) - ~450 lines, textured quads with cubic interpolation
 - ✅ `DirectVolumeRenderable` (`webgpu/renderable/direct-volume.ts`) - ~550 lines, raymarching with transfer function
+- ✅ `TextureMeshRenderable` (`webgpu/renderable/texture-mesh.ts`) - ~450 lines, texture-based geometry sampling
 
 #### Phase 5: Advanced Features
 - [x] WBOIT transparency (`webgpu/transparency.ts`) - ~560 lines, dual render targets

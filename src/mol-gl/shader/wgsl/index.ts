@@ -37,6 +37,7 @@ export * from './lines.wgsl';
 export * from './text.wgsl';
 export * from './image.wgsl';
 export * from './direct-volume.wgsl';
+export * from './texture-mesh.wgsl';
 
 // Shaders - Post-processing
 export * from './postprocessing.wgsl';

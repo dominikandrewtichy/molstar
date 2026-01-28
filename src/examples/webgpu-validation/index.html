@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGPU Migration Validation Test</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            background: #16213e;
+            padding: 1rem 2rem;
+            border-bottom: 2px solid #0f3460;
+        }
+        h1 { font-size: 1.5rem; color: #e94560; }
+        .subtitle { font-size: 0.9rem; color: #888; margin-top: 0.25rem; }
+        main {
+            flex: 1;
+            display: flex;
+            padding: 1rem;
+            gap: 1rem;
+        }
+        .panel {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 1rem;
+            overflow: auto;
+        }
+        .tests-panel { width: 400px; }
+        .canvas-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        #canvas {
+            border: 2px solid #0f3460;
+            border-radius: 4px;
+            max-width: 100%;
+        }
+        .test-category { margin-bottom: 1.5rem; }
+        .test-category h3 {
+            color: #e94560;
+            font-size: 0.95rem;
+            margin-bottom: 0.5rem;
+            padding-bottom: 0.25rem;
+            border-bottom: 1px solid #0f3460;
+        }
+        .test-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem;
+            margin: 0.25rem 0;
+            background: #0f3460;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .test-item:hover { background: #1a4a7a; }
+        .test-item.active { background: #e94560; }
+        .test-item .status {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #666;
+        }
+        .test-item.passed .status {
+            background: #4caf50;
+            box-shadow: 0 0 4px #4caf50;
+        }
+        .test-item.failed .status {
+            background: #f44336;
+            box-shadow: 0 0 4px #f44336;
+        }
+        .test-item.running .status {
+            background: #ff9800;
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        .controls {
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid #0f3460;
+        }
+        button {
+            background: #e94560;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            margin-right: 0.5rem;
+            transition: background 0.2s;
+        }
+        button:hover { background: #c73e54; }
+        button:disabled { background: #666; cursor: not-allowed; }
+        .info-panel {
+            margin-top: 1rem;
+            padding: 0.75rem;
+            background: #0f3460;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-family: monospace;
+        }
+        .info-panel .label { color: #888; }
+        .info-panel .value { color: #4caf50; }
+        .summary {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: #0f3460;
+            border-radius: 4px;
+        }
+        .summary.passed { border-left: 4px solid #4caf50; }
+        .summary.failed { border-left: 4px solid #f44336; }
+        #status { margin-top: 0.5rem; font-size: 0.85rem; color: #888; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>WebGPU Migration Validation</h1>
+        <div class="subtitle">Comprehensive test suite for WebGL to WebGPU migration</div>
+    </header>
+    <main>
+        <div class="panel tests-panel">
+            <div class="test-category">
+                <h3>Core Features</h3>
+                <div class="test-item" data-test="context">
+                    <span class="status"></span><span>Context Creation</span>
+                </div>
+                <div class="test-item" data-test="buffers">
+                    <span class="status"></span><span>Buffer Operations</span>
+                </div>
+                <div class="test-item" data-test="textures">
+                    <span class="status"></span><span>Texture Operations</span>
+                </div>
+                <div class="test-item" data-test="pipelines">
+                    <span class="status"></span><span>Pipeline Creation</span>
+                </div>
+            </div>
+            <div class="test-category">
+                <h3>Renderables</h3>
+                <div class="test-item" data-test="mesh">
+                    <span class="status"></span><span>Mesh Rendering</span>
+                </div>
+                <div class="test-item" data-test="spheres">
+                    <span class="status"></span><span>Sphere Impostors</span>
+                </div>
+                <div class="test-item" data-test="cylinders">
+                    <span class="status"></span><span>Cylinder Impostors</span>
+                </div>
+                <div class="test-item" data-test="lines">
+                    <span class="status"></span><span>Wide Lines</span>
+                </div>
+            </div>
+            <div class="test-category">
+                <h3>Advanced Features</h3>
+                <div class="test-item" data-test="transparency">
+                    <span class="status"></span><span>Transparency (WBOIT)</span>
+                </div>
+                <div class="test-item" data-test="picking">
+                    <span class="status"></span><span>Object Picking</span>
+                </div>
+                <div class="test-item" data-test="compute">
+                    <span class="status"></span><span>Compute Shaders</span>
+                </div>
+            </div>
+            <div class="controls">
+                <button id="runAll">Run All Tests</button>
+                <button id="clearResults">Clear Results</button>
+            </div>
+            <div class="info-panel">
+                <div><span class="label">Backend:</span> <span class="value" id="backend">-</span></div>
+                <div><span class="label">Device:</span> <span class="value" id="device">-</span></div>
+                <div><span class="label">Max Texture:</span> <span class="value" id="maxTexture">-</span></div>
+                <div><span class="label">Status:</span> <span class="value" id="statusText">Ready</span></div>
+            </div>
+            <div id="summary" class="summary" style="display: none;"></div>
+        </div>
+        <div class="panel canvas-panel">
+            <canvas id="canvas" width="600" height="600"></canvas>
+            <div id="status">Select a test to run</div>
+        </div>
+    </main>
+    <script src="index.js"></script>
+</body>
+</html>

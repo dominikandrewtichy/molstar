@@ -17,6 +17,7 @@ import { WebGPULinesRenderable, createWebGPULinesValues, WebGPULinesValues } fro
 import { WebGPUTextRenderable, createWebGPUTextValues, WebGPUTextValues } from './renderable/text';
 import { WebGPUImageRenderable, createWebGPUImageValues, WebGPUImageValues } from './renderable/image';
 import { WebGPUDirectVolumeRenderable, createWebGPUDirectVolumeValues, WebGPUDirectVolumeValues } from './renderable/direct-volume';
+import { WebGPUTextureMeshRenderable, createWebGPUTextureMeshValues, WebGPUTextureMeshValues } from './renderable/texture-mesh';
 import { ValueCell } from '../../mol-util/value-cell';
 
 /**
@@ -74,7 +75,7 @@ function getUint32ArrayValue(cell: any): Uint32Array | null {
  * Helper to safely get number value from ValueCell.
  */
 function getNumberValue(cell: any, defaultValue: number = 0): number {
-    if (!cell?.ref?.value !== undefined) return defaultValue;
+    if (cell?.ref?.value === undefined) return defaultValue;
     return typeof cell.ref.value === 'number' ? cell.ref.value : defaultValue;
 }
 
@@ -630,10 +631,21 @@ export function createWebGPURenderableFromObject(
                 });
             }
 
-            case 'texture-mesh':
-                // Texture-mesh not yet implemented for WebGPU
-                console.warn('WebGPU renderable for texture-mesh not yet implemented');
-                return null;
+            case 'texture-mesh': {
+                const webgpuValues = convertTextureMeshValues(values);
+                return new WebGPUTextureMeshRenderable({
+                    context,
+                    materialId,
+                    topology: 'triangle-list',
+                    values: webgpuValues,
+                    state,
+                    transparency,
+                    vertexShader: '',
+                    fragmentShaders: { color: '', pick: '', depth: '', marking: '', emissive: '', tracing: '' },
+                    vertexBufferLayouts: [],
+                    bindGroupLayouts: [],
+                });
+            }
 
             default:
                 console.warn(`Unknown render object type: ${(object as any).type}`);
@@ -648,6 +660,64 @@ export function createWebGPURenderableFromObject(
 /**
  * Check if a render object type is supported by the WebGPU backend.
  */
+/**
+ * Convert TextureMeshValues to WebGPU format.
+ */
+function convertTextureMeshValues(values: any): WebGPUTextureMeshValues {
+    const webgpuValues = createWebGPUTextureMeshValues();
+
+    // Copy texture references
+    if (values.tPosition?.ref?.value) {
+        webgpuValues.tPosition = ValueCell.create(values.tPosition.ref.value);
+    }
+
+    if (values.tNormal?.ref?.value) {
+        webgpuValues.tNormal = ValueCell.create(values.tNormal.ref.value);
+    }
+
+    if (values.tGroup?.ref?.value) {
+        webgpuValues.tGroup = ValueCell.create(values.tGroup.ref.value);
+    }
+
+    // Copy texture dimensions
+    const texDim = getArrayValue(values.uGeoTexDim);
+    if (texDim) webgpuValues.uGeoTexDim = ValueCell.create(texDim);
+
+    // Copy instance data
+    const transforms = getArrayValue(values.aTransform);
+    if (transforms) webgpuValues.aTransform = ValueCell.create(transforms);
+
+    // Copy counts
+    if (values.drawCount?.ref?.value !== undefined) {
+        webgpuValues.drawCount = ValueCell.create(values.drawCount.ref.value);
+    }
+    if (values.instanceCount?.ref?.value !== undefined) {
+        webgpuValues.instanceCount = ValueCell.create(values.instanceCount.ref.value);
+    }
+
+    // Copy material properties
+    const color = getArrayValue(values.uColor);
+    if (color) webgpuValues.uColor = ValueCell.create(color);
+
+    webgpuValues.uAlpha = ValueCell.create(getNumberValue(values.uAlpha, 1));
+    webgpuValues.uMetalness = ValueCell.create(getNumberValue(values.uMetalness, 0));
+    webgpuValues.uRoughness = ValueCell.create(getNumberValue(values.uRoughness, 0.5));
+
+    // Copy double-sided flag
+    webgpuValues.uDoubleSided = ValueCell.create(getNumberValue(values.uDoubleSided, 0));
+
+    // Copy bounding sphere
+    if (values.boundingSphere?.ref?.value) {
+        const bs = values.boundingSphere.ref.value;
+        webgpuValues.boundingSphere = ValueCell.create({
+            center: new Float32Array(bs.center || [0, 0, 0]),
+            radius: bs.radius || 0,
+        });
+    }
+
+    return webgpuValues;
+}
+
 export function isWebGPURenderObjectTypeSupported(type: RenderObjectType): boolean {
     switch (type) {
         case 'mesh':
@@ -658,9 +728,8 @@ export function isWebGPURenderObjectTypeSupported(type: RenderObjectType): boole
         case 'text':
         case 'image':
         case 'direct-volume':
-            return true;
         case 'texture-mesh':
-            return false;
+            return true;
         default:
             return false;
     }

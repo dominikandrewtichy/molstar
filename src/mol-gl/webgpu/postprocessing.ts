@@ -69,7 +69,7 @@ export class WebGPUSsaoPass {
         private context: GPUContext,
         width: number,
         height: number,
-        private depthTexture: Texture
+        private depthTexture: Texture | import('../gpu').TextureView
     ) {
         this.width = width;
         this.height = height;
@@ -275,20 +275,25 @@ export class WebGPUSsaoPass {
         this.sampleBuffer.write(new Float32Array(samples));
     }
 
-    private createSsaoBindGroup(depthTexture: Texture): BindGroup {
+    private createSsaoBindGroup(depthTexture: Texture | import('../gpu').TextureView): BindGroup {
         const sampler = this.context.createSampler({
             magFilter: 'linear',
             minFilter: 'linear',
         });
+
+        // Helper to get texture view from Texture or TextureView
+        const getView = (tex: Texture | import('../gpu').TextureView): import('../gpu').TextureView => {
+            return 'createView' in tex ? (tex as Texture).createView() : (tex as import('../gpu').TextureView);
+        };
 
         return this.context.createBindGroup({
             layout: this.ssaoBindGroupLayout!,
             entries: [
                 { binding: 0, resource: { buffer: this.ssaoUniformBuffer! } },
                 { binding: 1, resource: { buffer: this.sampleBuffer! } },
-                { binding: 2, resource: depthTexture.createView() },
-                { binding: 3, resource: depthTexture.createView() }, // Half depth (use same for now)
-                { binding: 4, resource: depthTexture.createView() }, // Quarter depth (use same for now)
+                { binding: 2, resource: getView(depthTexture) },
+                { binding: 3, resource: getView(depthTexture) }, // Half depth (use same for now)
+                { binding: 4, resource: getView(depthTexture) }, // Quarter depth (use same for now)
                 { binding: 5, resource: sampler },
             ],
             label: 'SSAO Bind Group'
@@ -302,8 +307,8 @@ export class WebGPUSsaoPass {
         });
 
         // Handle both Texture (needs createView) and TextureView (already a view)
-        const textureView = 'createView' in inputTexture 
-            ? (inputTexture as Texture).createView() 
+        const textureView = 'createView' in inputTexture
+            ? (inputTexture as Texture).createView()
             : inputTexture as import('../gpu').TextureView;
 
         return this.context.createBindGroup({
@@ -529,7 +534,7 @@ export class WebGPUOutlinePass {
         private context: GPUContext,
         width: number,
         height: number,
-        private depthTexture: Texture
+        private depthTexture: Texture | import('../gpu').TextureView
     ) {
         this.width = width;
         this.height = height;
@@ -616,12 +621,17 @@ export class WebGPUOutlinePass {
             minFilter: 'linear',
         });
 
+        // Helper to get texture view from Texture or TextureView
+        const getView = (tex: Texture | import('../gpu').TextureView): import('../gpu').TextureView => {
+            return 'createView' in tex ? (tex as Texture).createView() : (tex as import('../gpu').TextureView);
+        };
+
         return this.context.createBindGroup({
             layout: this.bindGroupLayout!,
             entries: [
                 { binding: 0, resource: { buffer: this.uniformBuffer! } },
-                { binding: 1, resource: this.depthTexture.createView() },
-                { binding: 2, resource: this.depthTexture.createView() },
+                { binding: 1, resource: getView(this.depthTexture) },
+                { binding: 2, resource: getView(this.depthTexture) },
                 { binding: 3, resource: sampler },
             ],
             label: 'Outline Bind Group'
@@ -736,7 +746,7 @@ export class WebGPUShadowPass {
         private context: GPUContext,
         width: number,
         height: number,
-        private depthTexture: Texture
+        private depthTexture: Texture | import('../gpu').TextureView
     ) {
         this.width = width;
         this.height = height;
@@ -818,11 +828,16 @@ export class WebGPUShadowPass {
             minFilter: 'linear',
         });
 
+        // Helper to get texture view from Texture or TextureView
+        const getView = (tex: Texture | import('../gpu').TextureView): import('../gpu').TextureView => {
+            return 'createView' in tex ? (tex as Texture).createView() : (tex as import('../gpu').TextureView);
+        };
+
         return this.context.createBindGroup({
             layout: this.bindGroupLayout!,
             entries: [
                 { binding: 0, resource: { buffer: this.uniformBuffer! } },
-                { binding: 1, resource: this.depthTexture.createView() },
+                { binding: 1, resource: getView(this.depthTexture) },
                 { binding: 2, resource: sampler },
             ],
             label: 'Shadow Bind Group'
@@ -973,10 +988,10 @@ export class WebGPUPostprocessingPass {
         private context: GPUContext,
         width: number,
         height: number,
-        private colorTexture: Texture,
-        private depthTexture: Texture,
-        private transparentColorTexture?: Texture,
-        private depthTextureTransparent?: Texture
+        private colorTexture: Texture | import('../gpu').TextureView,
+        private depthTexture: Texture | import('../gpu').TextureView,
+        private transparentColorTexture?: Texture | import('../gpu').TextureView,
+        private depthTextureTransparent?: Texture | import('../gpu').TextureView
     ) {
         this.width = width;
         this.height = height;
@@ -1130,17 +1145,22 @@ export class WebGPUPostprocessingPass {
 
         this.uniformBuffer!.write(uniforms);
 
+        // Helper to get texture view from Texture or TextureView
+        const getView = (tex: Texture | import('../gpu').TextureView): import('../gpu').TextureView => {
+            return 'createView' in tex ? (tex as Texture).createView() : (tex as import('../gpu').TextureView);
+        };
+
         return this.context.createBindGroup({
             layout: this.bindGroupLayout!,
             entries: [
                 { binding: 0, resource: { buffer: this.uniformBuffer! } },
-                { binding: 1, resource: this.colorTexture.createView() },
-                { binding: 2, resource: this.depthTexture.createView() },
+                { binding: 1, resource: getView(this.colorTexture) },
+                { binding: 2, resource: getView(this.depthTexture) },
                 { binding: 3, resource: this.ssao.getSsaoDepthTexture().createView() },
                 { binding: 4, resource: this.outline.getTexture().createView() },
                 { binding: 5, resource: this.shadow.getTexture().createView() },
-                { binding: 6, resource: this.transparentColorTexture?.createView() || this.colorTexture.createView() },
-                { binding: 7, resource: this.depthTextureTransparent?.createView() || this.depthTexture.createView() },
+                { binding: 6, resource: this.transparentColorTexture ? getView(this.transparentColorTexture) : getView(this.colorTexture) },
+                { binding: 7, resource: this.depthTextureTransparent ? getView(this.depthTextureTransparent) : getView(this.depthTexture) },
                 { binding: 8, resource: this.ssao.getSsaoDepthTransparentTexture().createView() },
                 { binding: 9, resource: sampler },
             ],

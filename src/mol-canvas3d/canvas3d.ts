@@ -20,7 +20,7 @@ import { GPUContext, GPUBackend, isWebGLBackedContext } from '../mol-gl/gpu/cont
 import { createGPUContext } from '../mol-gl/gpu/context-factory';
 import { createWebGPURenderer } from '../mol-gl/webgpu/renderer';
 import { createWebGPUScene } from '../mol-gl/webgpu/scene';
-import { createWebGPUPasses } from '../mol-gl/webgpu/passes';
+import { createWebGPUPasses, createWebGPUImagePass } from '../mol-gl/webgpu/passes';
 import { createWebGPURenderableFromObject, getWebGPUTransparency } from '../mol-gl/webgpu/renderable-factory';
 import { WebGPURenderable } from '../mol-gl/webgpu/renderable';
 import { Representation } from '../mol-repr/representation';
@@ -1770,6 +1770,14 @@ namespace Canvas3D {
             fov: degToRad(p.camera.fov),
         }, { x: 0, y: 0, width: drs.width, height: drs.height });
 
+        // Set up helper for camera helper
+        const helper = {
+            camera: { setProps: () => {} } as any,
+            debug: {} as any,
+            handle: {} as any,
+            pointer: {} as any,
+        };
+
         // Set up controls - use WebGPUScene with a compatibility wrapper
         const controls = TrackballControls.create(input, camera, webgpuScene as any, p.trackball, a.trackball);
 
@@ -1788,15 +1796,28 @@ namespace Canvas3D {
         const reprCount = new BehaviorSubject<number>(0);
         const resized = new BehaviorSubject<any>(0);
 
+        // Enable post-processing if configured
+        const hasPostprocessing = p.postprocessing?.enabled &&
+            (p.postprocessing.occlusion?.name === 'on' ||
+             p.postprocessing.shadow?.name === 'on' ||
+             p.postprocessing.outline?.name === 'on');
+        if (hasPostprocessing) {
+            passes.draw.setPostprocessingEnabled(true);
+        }
+
         // Simple render loop for WebGPU
         function render() {
             // Update renderer
             renderer.update(camera, webgpuScene);
 
-            // Render via WebGPU draw pass
+            // Render via WebGPU draw pass with post-processing props
             passes.draw.render(
                 { renderer, camera, scene: webgpuScene },
-                { transparentBackground: p.transparentBackground },
+                {
+                    transparentBackground: p.transparentBackground,
+                    postprocessing: hasPostprocessing ? p.postprocessing : undefined,
+                    backgroundColor: p.renderer.backgroundColor,
+                },
                 true
             );
         }
@@ -1979,13 +2000,31 @@ namespace Canvas3D {
                     if (newProps.renderer) {
                         renderer.setProps(newProps.renderer);
                     }
+                    if (newProps.postprocessing) {
+                        p.postprocessing = { ...p.postprocessing, ...newProps.postprocessing };
+                        const hasPostprocessing = p.postprocessing.enabled &&
+                            (p.postprocessing.occlusion?.name === 'on' ||
+                             p.postprocessing.shadow?.name === 'on' ||
+                             p.postprocessing.outline?.name === 'on');
+                        passes.draw.setPostprocessingEnabled(hasPostprocessing);
+                    }
                 }
                 forceNextRender = true;
             },
 
             setAttribs: () => {},
 
-            getImagePass: () => { throw new Error('getImagePass not implemented for WebGPU'); },
+            getImagePass: (props: Partial<ImageProps> = {}) => {
+                return createWebGPUImagePass(
+                    gpuContext,
+                    ctx.assetManager,
+                    renderer,
+                    webgpuScene,
+                    camera,
+                    helper,
+                    props
+                );
+            },
 
             getRenderObjects: () => {
                 const renderObjects: GraphicsRenderObject[] = [];

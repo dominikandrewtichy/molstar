@@ -12,3 +12,4 @@ export * from './lines';
 export * from './text';
 export * from './image';
 export * from './direct-volume';
+export * from './texture-mesh';

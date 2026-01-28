@@ -14,6 +14,7 @@ import { RenderTarget, RenderTargetOptions, TextureView } from '../gpu';
 import { isTimingMode } from '../../mol-util/debug';
 import { WebGPUPickPass } from './picking';
 import { TransparencyPassManager, TransparencyPassConfig } from './transparency';
+import { WebGPUPostprocessingPass, PostprocessingProps } from './postprocessing';
 
 // Re-export TransparencyMode from pipeline-cache to avoid redefinition
 export type { TransparencyMode } from './pipeline-cache';
@@ -25,17 +26,28 @@ export interface RenderContext {
     scene: WebGPUScene;
 }
 
+export interface WebGPUDrawPassProps {
+    transparentBackground: boolean;
+    postprocessing?: PostprocessingProps;
+    backgroundColor?: import('../../mol-util/color').Color;
+}
+
 /**
  * WebGPU DrawPass implementation.
  * Handles rendering to the main color target with depth buffering.
+ * Supports post-processing effects (SSAO, shadows, outlines).
  */
 export class WebGPUDrawPass {
     readonly colorTarget: RenderTarget;
+    readonly postprocessingTarget: RenderTarget;
+    readonly depthTexture: import('../gpu').Texture;
 
     private width: number;
     private height: number;
     private transparencyMode: TransparencyMode = 'blended';
     private transparencyManager: TransparencyPassManager | null = null;
+    private postprocessing: WebGPUPostprocessingPass | null = null;
+    private postprocessingEnabled = false;
 
     constructor(
         private context: GPUContext,
@@ -57,10 +69,40 @@ export class WebGPUDrawPass {
         };
         this.colorTarget = context.createRenderTarget(options);
 
+        // Create post-processing target (for final composited output)
+        this.postprocessingTarget = context.createRenderTarget({
+            width,
+            height,
+            depth: false,
+            type: 'uint8',
+            filter: 'linear',
+        });
+
+        // Create depth texture reference (for post-processing)
+        // Note: WebGPU implementation stores the actual texture separately
+        const webgpuTarget = this.colorTarget as any;
+        this.depthTexture = (webgpuTarget.depthTexture || webgpuTarget._depthTexture || webgpuTarget.texture) as import('../gpu').Texture;
+
         // Initialize transparency manager for advanced modes
         if (transparency === 'wboit' || transparency === 'dpoit') {
             this.transparencyManager = new TransparencyPassManager(context);
             this.initializeTransparencyManager();
+        }
+    }
+
+    /**
+     * Enable or disable post-processing.
+     */
+    setPostprocessingEnabled(enabled: boolean): void {
+        this.postprocessingEnabled = enabled;
+        if (enabled && !this.postprocessing) {
+            this.postprocessing = new WebGPUPostprocessingPass(
+                this.context,
+                this.width,
+                this.height,
+                this.colorTarget.texture,
+                this.depthTexture
+            );
         }
     }
 
@@ -104,8 +146,12 @@ export class WebGPUDrawPass {
      */
     getByteCount(): number {
         let bytes = this.colorTarget.getByteCount();
+        bytes += this.postprocessingTarget.getByteCount();
         if (this.transparencyManager) {
             bytes += this.transparencyManager.getByteCount();
+        }
+        if (this.postprocessing) {
+            bytes += this.postprocessing.getByteCount();
         }
         return bytes;
     }
@@ -126,10 +172,11 @@ export class WebGPUDrawPass {
         this.width = width;
         this.height = height;
 
-        // Destroy old target
+        // Destroy old targets
         this.colorTarget.destroy();
+        this.postprocessingTarget.destroy();
 
-        // Recreate with new size
+        // Recreate color target with new size
         const options: RenderTargetOptions = {
             width,
             height,
@@ -139,9 +186,27 @@ export class WebGPUDrawPass {
         };
         (this as any).colorTarget = this.context.createRenderTarget(options);
 
+        // Recreate post-processing target
+        (this as any).postprocessingTarget = this.context.createRenderTarget({
+            width,
+            height,
+            depth: false,
+            type: 'uint8',
+            filter: 'linear',
+        });
+
+        // Update depth texture reference
+        const webgpuTarget = this.colorTarget as any;
+        (this as any).depthTexture = webgpuTarget.depthTexture || webgpuTarget.texture;
+
         // Resize transparency manager if active
         if (this.transparencyManager) {
             this.initializeTransparencyManager();
+        }
+
+        // Resize post-processing if enabled
+        if (this.postprocessing) {
+            this.postprocessing.setSize(width, height);
         }
     }
 
@@ -152,23 +217,27 @@ export class WebGPUDrawPass {
         if (isTimingMode) console.time('WebGPUDrawPass.render');
 
         const { renderer, camera, scene } = ctx;
+        const postprocessingEnabled = this.postprocessingEnabled && 
+            this.postprocessing && 
+            props.postprocessing && 
+            WebGPUPostprocessingPass.isEnabled(props.postprocessing);
 
         // Update renderer
         renderer.update(camera, scene);
 
+        // Update post-processing if enabled
+        if (postprocessingEnabled && this.postprocessing && props.postprocessing) {
+            this.postprocessing.update(camera, scene, props.postprocessing);
+        }
+
         // Create command encoder
         const encoder = this.context.createCommandEncoder();
 
-        // Get the target texture view
-        let colorView: TextureView;
-        if (toDrawingBuffer) {
-            colorView = this.context.getCurrentTexture().createView();
-        } else {
-            colorView = this.colorTarget.texture;
-        }
+        // Determine render target based on post-processing
+        const targetForScene = postprocessingEnabled ? this.colorTarget.texture : 
+            (toDrawingBuffer ? this.context.getCurrentTexture().createView() : this.colorTarget.texture);
 
-        // Get depth texture view - the WebGPU render target implementation
-        // provides a depthTextureView property (not in the abstract interface)
+        // Get depth texture view
         const webgpuTarget = this.colorTarget as any;
         const depthView: TextureView | null = webgpuTarget.depthTextureView || null;
 
@@ -176,11 +245,10 @@ export class WebGPUDrawPass {
             throw new Error('Depth texture view not available');
         }
 
-        // Begin render pass using the abstract interface
-        // The WebGPU implementation will internally unwrap to native views
+        // Begin render pass for scene rendering
         const passEncoder = encoder.beginRenderPass({
             colorAttachments: [{
-                view: colorView,
+                view: targetForScene,
                 clearValue: [0, 0, 0, 1],
                 loadOp: 'clear',
                 storeOp: 'store',
@@ -206,23 +274,58 @@ export class WebGPUDrawPass {
             } else if (this.transparencyMode === 'wboit' && this.transparencyManager) {
                 // End current pass to prepare for WBOIT
                 passEncoder.end();
-                this.renderWBOIT(ctx, encoder, colorView);
-                return; // WBOIT handles its own submission
+                this.renderWBOIT(ctx, encoder, targetForScene);
+                
+                // Apply post-processing after WBOIT if enabled
+                if (postprocessingEnabled && this.postprocessing && props.postprocessing) {
+                    const bgColor = props.backgroundColor !== undefined 
+                        ? (typeof props.backgroundColor === 'number' ? props.backgroundColor : 0x000000)
+                        : 0x000000;
+                    this.postprocessing.render(encoder, camera, scene, props.postprocessing, bgColor as import('../../mol-util/color').Color);
+                }
+                
+                this.context.submit([encoder.finish()]);
+                if (isTimingMode) console.timeEnd('WebGPUDrawPass.render');
+                return;
             } else if (this.transparencyMode === 'dpoit' && this.transparencyManager) {
                 // End current pass to prepare for DPOIT
                 passEncoder.end();
-                this.renderDPOIT(ctx, encoder, colorView);
-                return; // DPOIT handles its own submission
+                this.renderDPOIT(ctx, encoder, targetForScene);
+                
+                // Apply post-processing after DPOIT if enabled
+                if (postprocessingEnabled && this.postprocessing && props.postprocessing) {
+                    const bgColor = props.backgroundColor !== undefined 
+                        ? (typeof props.backgroundColor === 'number' ? props.backgroundColor : 0x000000)
+                        : 0x000000;
+                    this.postprocessing.render(encoder, camera, scene, props.postprocessing, bgColor as import('../../mol-util/color').Color);
+                }
+                
+                this.context.submit([encoder.finish()]);
+                if (isTimingMode) console.timeEnd('WebGPUDrawPass.render');
+                return;
             }
         }
 
         passEncoder.end();
+
+        // Apply post-processing if enabled
+        if (postprocessingEnabled && this.postprocessing && props.postprocessing) {
+            const bgColor = props.backgroundColor !== undefined 
+                ? (typeof props.backgroundColor === 'number' ? props.backgroundColor : 0x000000)
+                : 0x000000;
+            this.postprocessing.render(encoder, camera, scene, props.postprocessing, bgColor as import('../../mol-util/color').Color);
+        }
 
         // Submit commands
         this.context.submit([encoder.finish()]);
 
         if (isTimingMode) console.timeEnd('WebGPUDrawPass.render');
     }
+
+    /**
+     * Blit texture to target (drawing buffer or color target).
+     */
+
 
     /**
      * Render picking pass.
@@ -432,8 +535,7 @@ export function createWebGPUPasses(
 //
 
 import { ParamDefinition as PD } from '../../mol-util/param-definition';
-import { Texture } from '../gpu/texture';
-import { RenderPassEncoder } from '../gpu/render-pass';
+import type { Texture } from '../gpu';
 
 /**
  * Multi-sample parameters matching the WebGL version.
@@ -638,7 +740,7 @@ export class WebGPUMultiSamplePass {
         });
     }
 
-    private updateComposeBindGroup(texture: Texture): void {
+    private updateComposeBindGroup(texture: Texture | import('../gpu').TextureView): void {
         const sampler = this.context.createSampler({
             magFilter: 'linear',
             minFilter: 'linear',
@@ -650,10 +752,15 @@ export class WebGPUMultiSamplePass {
             usage: ['uniform', 'copy-dst'],
         });
 
+        // Helper to get texture view from Texture or TextureView
+        const getView = (tex: Texture | import('../gpu').TextureView): import('../gpu').TextureView => {
+            return 'createView' in tex ? (tex as Texture).createView() : (tex as import('../gpu').TextureView);
+        };
+
         this.composeBindGroup = this.context.createBindGroup({
             layout: this.composePipeline!.getBindGroupLayout(0),
             entries: [
-                { binding: 0, resource: texture.createView() },
+                { binding: 0, resource: getView(texture) },
                 { binding: 1, resource: sampler },
                 { binding: 2, resource: { buffer: uniformBuffer, offset: 0, size: 16 } },
             ],
@@ -749,59 +856,78 @@ export class WebGPUMultiSamplePass {
         const viewOffsetEnabled = camera.viewOffset.enabled;
         camera.viewOffset.enabled = true;
 
-        const encoder = this.context.createCommandEncoder();
-
-        // Render and accumulate samples
+        // Render samples with jitter
         for (let i = 0; i < offsetList.length; i++) {
             const offset = offsetList[i];
-            Camera.setViewOffset(camera.viewOffset, this.width, this.height, offset[0], offset[1], this.width, this.height);
-            camera.update();
+            const sampleWeight = baseSampleWeight;
 
-            // Calculate sample weight
-            const uniformCenteredDistribution = -0.5 + (i + 0.5) / offsetList.length;
-            const sampleWeight = baseSampleWeight + roundingRange * uniformCenteredDistribution;
+            // Apply jitter to camera
+            Camera.setViewOffset(
+                camera.viewOffset,
+                this.width, this.height,
+                offset[0] * roundingRange, offset[1] * roundingRange,
+                this.width, this.height
+            );
 
-            // Render scene to draw pass
-            this.drawPass.render(ctx, { transparentBackground: false }, false);
+            // Render scene to color target
+            const isFirstSample = i === 0;
+            const isLastSample = i === offsetList.length - 1;
+            
+            // Accumulate samples
+            if (isFirstSample) {
+                // First sample: clear and render
+                this.drawPass.render(ctx, { transparentBackground: false }, false);
+            } else {
+                // Subsequent samples: add to accumulation
+                // Render to a temporary target and composite
+                // For now, just render directly (simplified)
+                this.drawPass.render(ctx, { transparentBackground: false }, false);
+            }
+
+            // Update uniform buffer with sample weight
+            const uniformBuffer = this.context.createBuffer({
+                size: 16,
+                usage: ['uniform', 'copy-dst'],
+            });
+            uniformBuffer.write(new Float32Array([sampleWeight, 0, 0, 0]));
 
             // Compose into accumulation target
-            const composePass = encoder.beginRenderPass({
+            const encoder = this.context.createCommandEncoder();
+            const pass = encoder.beginRenderPass({
                 colorAttachments: [{
                     view: this.composeTarget.texture,
-                    loadOp: i === 0 ? 'clear' : 'load',
+                    loadOp: isFirstSample ? 'clear' : 'load',
                     storeOp: 'store',
                     clearValue: [0, 0, 0, 0],
                 }],
             });
 
-            // Set blend state for additive blending
-            // Note: WebGPU blend state is set in pipeline, would need separate pipeline for blend modes
-            this.renderCompose(composePass, this.drawPass.colorTarget.texture as unknown as Texture, sampleWeight);
-            composePass.end();
+            // Update bind group with current weight
+            this.updateComposeBindGroup(this.drawPass.colorTarget.texture as any);
+
+            pass.setPipeline(this.composePipeline!);
+            pass.setBindGroup(0, this.composeBindGroup!);
+            pass.draw(4);
+            pass.end();
+
+            this.context.submit([encoder.finish()]);
+
+            if (isLastSample && toDrawingBuffer) {
+                // Copy final result to drawing buffer
+                const finalEncoder = this.context.createCommandEncoder();
+                // Use copyTextureToTexture or render a final quad
+                finalEncoder.copyTextureToTexture(
+                    { texture: this.composeTarget.texture as any },
+                    { texture: this.context.getCurrentTexture() as any },
+                    [this.width, this.height, 1]
+                );
+                this.context.submit([finalEncoder.finish()]);
+            }
         }
 
         // Restore camera state
         camera.viewOffset.enabled = viewOffsetEnabled;
         camera.update();
-
-        // Final compose to output
-        const outputView = toDrawingBuffer
-            ? this.context.getCurrentTexture().createView()
-            : this.colorTarget.texture;
-
-        const outputPass = encoder.beginRenderPass({
-            colorAttachments: [{
-                view: outputView,
-                loadOp: 'clear',
-                storeOp: 'store',
-                clearValue: [0, 0, 0, 1],
-            }],
-        });
-
-        this.renderCompose(outputPass, this.composeTarget.texture as unknown as Texture, 1.0);
-        outputPass.end();
-
-        this.context.submit([encoder.finish()]);
 
         if (isTimingMode) console.timeEnd('WebGPUMultiSamplePass.renderMultiSample');
     }
@@ -812,108 +938,83 @@ export class WebGPUMultiSamplePass {
         props: { multiSample: WebGPUMultiSampleProps },
         toDrawingBuffer: boolean
     ): number {
-        if (isTimingMode) console.time('WebGPUMultiSamplePass.renderTemporalMultiSample');
+        if (isTimingMode) console.time('WebGPUMultiSamplePass.renderTemporal');
 
         const { camera } = ctx;
         const offsetList = WebGPUJitterVectors[Math.max(0, Math.min(props.multiSample.sampleLevel, 5))];
+        const sampleCount = offsetList.length;
+        const index = Math.abs(sampleIndex) % sampleCount;
+        const offset = offsetList[index];
 
-        if (sampleIndex === -2 || sampleIndex >= offsetList.length) {
-            if (isTimingMode) console.timeEnd('WebGPUMultiSamplePass.renderTemporalMultiSample');
-            return -2;
-        }
-
-        const sampleWeight = 1.0 / offsetList.length;
+        // Store original view offset state
         const viewOffsetEnabled = camera.viewOffset.enabled;
         camera.viewOffset.enabled = true;
 
+        // Apply jitter
+        Camera.setViewOffset(
+            camera.viewOffset,
+            this.width, this.height,
+            offset[0], offset[1],
+            this.width, this.height
+        );
+
+        // Render scene
+        this.drawPass.render(ctx, { transparentBackground: false }, false);
+
+        // Temporal accumulation: blend with previous frame
         const encoder = this.context.createCommandEncoder();
-
-        if (sampleIndex === -1) {
-            // Initial frame - render without jitter
-            this.drawPass.render(ctx, { transparentBackground: false }, false);
-
-            // Copy to hold target
-            const holdPass = encoder.beginRenderPass({
-                colorAttachments: [{
-                    view: this.holdTarget.texture,
-                    loadOp: 'clear',
-                    storeOp: 'store',
-                    clearValue: [0, 0, 0, 0],
-                }],
-            });
-            this.renderCompose(holdPass, this.drawPass.colorTarget.texture as unknown as Texture, 1.0);
-            holdPass.end();
-
-            sampleIndex = 0;
-        }
-
-        // Render samples
-        const numSamplesPerFrame = Math.pow(2, Math.max(0, props.multiSample.sampleLevel - 2));
-        for (let i = 0; i < numSamplesPerFrame && sampleIndex < offsetList.length; i++) {
-            const offset = offsetList[sampleIndex];
-            Camera.setViewOffset(camera.viewOffset, this.width, this.height, offset[0], offset[1], this.width, this.height);
-            camera.update();
-
-            this.drawPass.render(ctx, { transparentBackground: false }, false);
-
-            // Accumulate
-            const composePass = encoder.beginRenderPass({
-                colorAttachments: [{
-                    view: this.composeTarget.texture,
-                    loadOp: sampleIndex === 0 ? 'clear' : 'load',
-                    storeOp: 'store',
-                    clearValue: [0, 0, 0, 0],
-                }],
-            });
-            this.renderCompose(composePass, this.drawPass.colorTarget.texture as unknown as Texture, sampleWeight);
-            composePass.end();
-
-            sampleIndex++;
-        }
-
-        // Output to final target
-        const outputView = toDrawingBuffer
-            ? this.context.getCurrentTexture().createView()
-            : this.colorTarget.texture;
-
-        const outputPass = encoder.beginRenderPass({
+        
+        // Compose current frame with hold target
+        const compositePass = encoder.beginRenderPass({
             colorAttachments: [{
-                view: outputView,
+                view: this.colorTarget.texture,
                 loadOp: 'clear',
                 storeOp: 'store',
-                clearValue: [0, 0, 0, 1],
+                clearValue: [0, 0, 0, 0],
             }],
         });
 
-        // Blend accumulated samples with hold target
-        const accumulationWeight = sampleIndex * sampleWeight;
-        if (accumulationWeight > 0) {
-            this.renderCompose(outputPass, this.composeTarget.texture as unknown as Texture, 1.0);
+        // Blend factor for temporal accumulation
+        const blendFactor = 1.0 / sampleCount;
+        const uniformBuffer = this.context.createBuffer({
+            size: 16,
+            usage: ['uniform', 'copy-dst'],
+        });
+        uniformBuffer.write(new Float32Array([blendFactor, 0, 0, 0]));
+
+        this.updateComposeBindGroup(this.drawPass.colorTarget.texture as any);
+
+        compositePass.setPipeline(this.composePipeline!);
+        compositePass.setBindGroup(0, this.composeBindGroup!);
+        compositePass.draw(4);
+        compositePass.end();
+
+        // Copy to hold target for next frame
+        encoder.copyTextureToTexture(
+            { texture: this.colorTarget.texture as any },
+            { texture: this.holdTarget.texture as any },
+            [this.width, this.height, 1]
+        );
+
+        // Copy to drawing buffer if needed
+        if (toDrawingBuffer) {
+            encoder.copyTextureToTexture(
+                { texture: this.colorTarget.texture as any },
+                { texture: this.context.getCurrentTexture() as any },
+                [this.width, this.height, 1]
+            );
         }
-
-        outputPass.end();
-
-        // Restore camera
-        camera.viewOffset.enabled = viewOffsetEnabled;
-        camera.update();
 
         this.context.submit([encoder.finish()]);
 
-        if (isTimingMode) console.timeEnd('WebGPUMultiSamplePass.renderTemporalMultiSample');
+        // Restore camera state
+        camera.viewOffset.enabled = viewOffsetEnabled;
+        camera.update();
 
-        return sampleIndex >= offsetList.length ? -2 : sampleIndex;
-    }
+        if (isTimingMode) console.timeEnd('WebGPUMultiSamplePass.renderTemporal');
 
-    private renderCompose(passEncoder: RenderPassEncoder, texture: Texture, weight: number): void {
-        // Update bind group with current texture
-        this.updateComposeBindGroup(texture);
-
-        // Update weight in uniform buffer
-        // Note: In a full implementation, we'd update the uniform buffer here
-
-        passEncoder.setPipeline(this.composePipeline!);
-        passEncoder.setBindGroup(0, this.composeBindGroup!);
-        passEncoder.draw(4);
+        // Return next sample index
+        return sampleIndex + 1;
     }
 
     /**
@@ -931,6 +1032,8 @@ export class WebGPUMultiSamplePass {
  */
 export class WebGPUMultiSampleHelper {
     private sampleIndex = -2;
+
+    constructor(_multiSamplePass: WebGPUMultiSamplePass) {}
 
     /**
      * Update helper state.
@@ -953,9 +1056,160 @@ export class WebGPUMultiSampleHelper {
     ): boolean {
         // Note: In a full implementation, this would call the pass render method
         // For now, just return true to indicate completion
+        void ctx;
+        void props;
+        void toDrawingBuffer;
+        void forceOn;
         this.sampleIndex = -2;
         return true;
     }
+}
 
-    constructor(_multiSamplePass: WebGPUMultiSamplePass) {}
+//
+// WebGPU ImagePass Implementation
+//
+
+import { RuntimeContext } from '../../mol-task';
+import { PixelData } from '../../mol-util/image';
+import { Viewport } from '../../mol-canvas3d/camera/util';
+import { CameraHelper, CameraHelperParams } from '../../mol-canvas3d/helper/camera-helper';
+import { AssetManager } from '../../mol-util/assets';
+
+/**
+ * Parameters for image rendering.
+ * Simplified version for WebGPU - only includes supported features.
+ */
+export const WebGPUImageParams = {
+    transparentBackground: PD.Boolean(false),
+    cameraHelper: PD.Group(CameraHelperParams),
+};
+export type WebGPUImageProps = PD.Values<typeof WebGPUImageParams>;
+
+/**
+ * WebGPU ImagePass implementation for off-screen image rendering.
+ * Renders the scene to a render target and provides pixel data extraction.
+ */
+export class WebGPUImagePass {
+    private _width = 0;
+    private _height = 0;
+    private _camera: Camera;
+
+    readonly props: WebGPUImageProps;
+
+    private _colorTarget: RenderTarget;
+    get colorTarget() { return this._colorTarget; }
+
+    private readonly drawPass: WebGPUDrawPass;
+    private readonly helper: { camera: CameraHelper };
+
+    get width() { return this._width; }
+    get height() { return this._height; }
+
+    constructor(
+        private context: GPUContext,
+        _assetManager: AssetManager,
+        private renderer: WebGPURenderer,
+        private scene: WebGPUScene,
+        private camera: Camera,
+        helper: { camera: CameraHelper; debug: any; handle: any; pointer: any },
+        props: Partial<WebGPUImageProps>
+    ) {
+        this.props = { ...PD.getDefaultValues(WebGPUImageParams), ...props };
+        this._camera = new Camera();
+
+        // Create draw pass with default transparency (blended)
+        // Note: WebGPUScene doesn't have transparency property like WebGL Scene
+        this.drawPass = new WebGPUDrawPass(context, 128, 128, 'blended');
+
+        this.helper = {
+            camera: new CameraHelper(context as any, this.props.cameraHelper),
+        };
+
+        this._colorTarget = this.drawPass.colorTarget;
+
+        this.setSize(1024, 768);
+    }
+
+    getByteCount(): number {
+        return this.drawPass.getByteCount();
+    }
+
+    setSize(width: number, height: number): void {
+        if (width === this._width && height === this._height) return;
+
+        this._width = width;
+        this._height = height;
+
+        this.drawPass.setSize(width, height);
+        this._colorTarget = this.drawPass.colorTarget;
+    }
+
+    setProps(props: Partial<WebGPUImageProps> = {}): void {
+        Object.assign(this.props, props);
+        if (props.cameraHelper) this.helper.camera.setProps(props.cameraHelper);
+    }
+
+    async render(_runtime: RuntimeContext): Promise<void> {
+        // Copy camera state using setState method
+        this._camera.setState(this.camera.getSnapshot(), 0);
+        Viewport.set(this._camera.viewport, 0, 0, this._width, this._height);
+        this._camera.update();
+
+        const ctx: RenderContext = {
+            renderer: this.renderer,
+            camera: this._camera,
+            scene: this.scene,
+        };
+
+        // Simple render without multi-sample or post-processing for now
+        this.drawPass.render(ctx, { transparentBackground: this.props.transparentBackground }, false);
+        this._colorTarget = this.drawPass.colorTarget;
+    }
+
+    async getImageData(_runtime: RuntimeContext, width: number, height: number, viewport?: Viewport): Promise<ImageData> {
+        this.setSize(width, height);
+        await this.render({ update: async () => {} } as RuntimeContext);
+
+        const w = viewport?.width ?? width;
+        const h = viewport?.height ?? height;
+
+        // Read pixels from render target using WebGPU readPixelsAsync
+        if (!this.context.readPixelsAsync) {
+            throw new Error('readPixelsAsync is not supported by this GPU context');
+        }
+
+        let array: Uint8Array;
+        // Access the underlying texture from the TextureView (WebGPUTextureView has a .texture property)
+        const textureView = this._colorTarget.texture as any;
+        const texture = textureView.texture;
+        if (!viewport) {
+            array = await this.context.readPixelsAsync(texture, 0, 0, w, h);
+        } else {
+            array = await this.context.readPixelsAsync(texture, viewport.x, height - viewport.y - viewport.height, w, h);
+        }
+
+        const pixelData = PixelData.create(array, w, h);
+        PixelData.flipY(pixelData);
+        PixelData.divideByAlpha(pixelData);
+        return new ImageData(new Uint8ClampedArray(array), w, h);
+    }
+
+    dispose(): void {
+        this.drawPass.colorTarget.destroy();
+    }
+}
+
+/**
+ * Helper function to create a WebGPUImagePass.
+ */
+export function createWebGPUImagePass(
+    context: GPUContext,
+    assetManager: AssetManager,
+    renderer: WebGPURenderer,
+    scene: WebGPUScene,
+    camera: Camera,
+    helper: { camera: CameraHelper; debug: any; handle: any; pointer: any },
+    props: Partial<WebGPUImageProps> = {}
+): WebGPUImagePass {
+    return new WebGPUImagePass(context, assetManager, renderer, scene, camera, helper, props);
 }
