@@ -840,7 +840,7 @@ class WebGPUTexture implements Texture {
     }
 
     write(
-        data: ArrayBufferView,
+        data: ArrayBufferView | ImageBitmap | HTMLCanvasElement | HTMLImageElement | ImageData,
         options?: {
             origin?: [number, number, number];
             size?: [number, number, number];
@@ -852,6 +852,33 @@ class WebGPUTexture implements Texture {
         const origin = options?.origin ?? [0, 0, 0];
         const size = options?.size ?? [this.width, this.height, this.depth];
 
+        // Handle image sources (ImageBitmap, HTMLCanvasElement, HTMLImageElement, ImageData)
+        if (data instanceof ImageBitmap || data instanceof HTMLCanvasElement ||
+            data instanceof HTMLImageElement || data instanceof ImageData) {
+            // For image sources, we need to copy to the texture using a command encoder
+            const source: GPUImageCopyExternalImage = {
+                source: data as GPUImageCopyExternalImageSource,
+                origin: { x: 0, y: 0 },
+            };
+
+            const destination: GPUImageCopyTextureTagged = {
+                texture: this._texture,
+                mipLevel: options?.mipLevel ?? 0,
+                origin: { x: origin[0], y: origin[1], z: origin[2] },
+                premultipliedAlpha: false,
+            };
+
+            const copySize: GPUExtent3D = {
+                width: size[0],
+                height: size[1],
+                depthOrArrayLayers: size[2] ?? 1,
+            };
+
+            this._device.queue.copyExternalImageToTexture(source, destination, copySize);
+            return;
+        }
+
+        // Handle ArrayBufferView data
         this._device.queue.writeTexture(
             {
                 texture: this._texture,

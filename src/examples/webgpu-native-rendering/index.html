@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mol* WebGPU Native Rendering Example</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            overflow: hidden;
+        }
+        
+        #container {
+            display: flex;
+            height: 100vh;
+        }
+        
+        #sidebar {
+            width: 300px;
+            padding: 20px;
+            background: #252525;
+            overflow-y: auto;
+        }
+        
+        h1 {
+            font-size: 18px;
+            margin-bottom: 20px;
+            color: #4fc3f7;
+        }
+        
+        h2 {
+            font-size: 14px;
+            margin: 20px 0 10px;
+            color: #aaa;
+        }
+        
+        .info {
+            font-size: 12px;
+            line-height: 1.6;
+            color: #888;
+            margin-bottom: 15px;
+        }
+        
+        .stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #333;
+            font-size: 13px;
+        }
+        
+        .stat-label {
+            color: #888;
+        }
+        
+        .stat-value {
+            color: #4fc3f7;
+            font-family: monospace;
+        }
+        
+        button {
+            width: 100%;
+            padding: 10px;
+            margin: 5px 0;
+            background: #333;
+            border: 1px solid #444;
+            color: #fff;
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        
+        button:hover {
+            background: #444;
+        }
+        
+        button.active {
+            background: #4fc3f7;
+            color: #000;
+        }
+        
+        #canvas-container {
+            flex: 1;
+            position: relative;
+        }
+        
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        
+        #status {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            padding: 10px 15px;
+            background: rgba(0,0,0,0.8);
+            border-radius: 4px;
+            font-size: 12px;
+            color: #4fc3f7;
+        }
+        
+        .error {
+            color: #ff5252;
+        }
+        
+        .success {
+            color: #69f0ae;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="sidebar">
+            <h1>WebGPU Native Rendering</h1>
+            
+            <div class="info">
+                This example demonstrates direct WebGPU API usage with Mol*'s 
+                native WebGPU renderer, bypassing the WebGL compatibility layer.
+            </div>
+            
+            <h2>Controls</h2>
+            <button id="btn-reset">Reset Camera</button>
+            <button id="btn-rotate">Toggle Rotation</button>
+            <button id="btn-wireframe">Toggle Wireframe</button>
+            
+            <h2>Scene Objects</h2>
+            <button id="btn-cube">Add Cube</button>
+            <button id="btn-sphere">Add Sphere</button>
+            <button id="btn-clear">Clear Scene</button>
+            
+            <h2>Stats</h2>
+            <div class="stat">
+                <span class="stat-label">Backend</span>
+                <span class="stat-value" id="stat-backend">-</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">FPS</span>
+                <span class="stat-value" id="stat-fps">-</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">Draw Calls</span>
+                <span class="stat-value" id="stat-draws">-</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">Objects</span>
+                <span class="stat-value" id="stat-objects">-</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">Vertices</span>
+                <span class="stat-value" id="stat-vertices">-</span>
+            </div>
+        </div>
+        
+        <div id="canvas-container">
+            <canvas id="canvas"></canvas>
+            <div id="status">Initializing...</div>
+        </div>
+    </div>
+    
+    <script type="text/javascript" src="./index.js"></script>
+</body>
+</html>

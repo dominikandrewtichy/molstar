@@ -487,7 +487,66 @@ export class WebGPUTextRenderable extends WebGPURenderableBase<WebGPUTextValues>
     }
 
     private createFontTexture(): void {
-        // Create a default 1x1 font texture if none provided
+        const fontData = this.values.tFont.ref.value;
+
+        if (fontData) {
+            // Get dimensions from the font atlas source
+            let width = 0;
+            let height = 0;
+
+            if (fontData instanceof ImageData) {
+                width = fontData.width;
+                height = fontData.height;
+            } else if (fontData instanceof HTMLCanvasElement) {
+                width = fontData.width;
+                height = fontData.height;
+            } else if (fontData instanceof HTMLImageElement) {
+                width = fontData.naturalWidth || fontData.width;
+                height = fontData.naturalHeight || fontData.height;
+            }
+
+            // Only proceed if we have valid dimensions
+            if (width > 0 && height > 0) {
+                // Destroy old texture if size changed
+                if (this.fontTexture && (this.fontTexture.width !== width || this.fontTexture.height !== height)) {
+                    this.fontTexture.destroy();
+                    this.fontTexture = null;
+                }
+
+                // Create or recreate texture with correct size
+                if (!this.fontTexture) {
+                    this.fontTexture = this.context.createTexture({
+                        size: [width, height],
+                        format: 'rgba8unorm',
+                        usage: ['texture-binding', 'copy-dst'],
+                        label: 'text-font-texture',
+                    });
+
+                    // Create sampler if not exists
+                    if (!this.fontSampler) {
+                        this.fontSampler = this.context.createSampler({
+                            magFilter: 'linear',
+                            minFilter: 'linear',
+                            addressModeU: 'clamp-to-edge',
+                            addressModeV: 'clamp-to-edge',
+                            label: 'text-font-sampler',
+                        });
+                    }
+                }
+
+                // Upload font atlas data
+                this.fontTexture.write(fontData);
+
+                // Update texture dimensions uniform
+                const texDim = this.values.uTexDim.ref.value;
+                texDim[0] = width;
+                texDim[1] = height;
+
+                return;
+            }
+        }
+
+        // Create default 1x1 white texture if no font data provided
         if (!this.fontTexture) {
             this.fontTexture = this.context.createTexture({
                 size: [1, 1],
@@ -509,8 +568,6 @@ export class WebGPUTextRenderable extends WebGPURenderableBase<WebGPUTextValues>
                 label: 'text-font-sampler',
             });
         }
-
-        // TODO: Handle actual font atlas upload from tFont value
     }
 
     private createInstanceStorageBuffer(): void {

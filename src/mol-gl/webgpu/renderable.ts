@@ -356,7 +356,10 @@ export abstract class WebGPURenderableBase<T extends WebGPURenderableValues> imp
             bytes += ub.buffer.size;
         }
 
-        // TODO: Add texture memory
+        // Add texture memory
+        for (const [, tex] of this.textures) {
+            bytes += tex.texture.getByteCount();
+        }
 
         return bytes;
     }

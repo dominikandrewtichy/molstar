@@ -13,6 +13,7 @@ import { Camera } from '../../mol-canvas3d/camera';
 import { RenderTarget, RenderTargetOptions, TextureView } from '../gpu';
 import { isTimingMode } from '../../mol-util/debug';
 import { WebGPUPickPass } from './picking';
+import { TransparencyPassManager, TransparencyPassConfig } from './transparency';
 
 // Re-export TransparencyMode from pipeline-cache to avoid redefinition
 export type { TransparencyMode } from './pipeline-cache';
@@ -34,6 +35,7 @@ export class WebGPUDrawPass {
     private width: number;
     private height: number;
     private transparencyMode: TransparencyMode = 'blended';
+    private transparencyManager: TransparencyPassManager | null = null;
 
     constructor(
         private context: GPUContext,
@@ -54,6 +56,23 @@ export class WebGPUDrawPass {
             filter: 'linear',
         };
         this.colorTarget = context.createRenderTarget(options);
+
+        // Initialize transparency manager for advanced modes
+        if (transparency === 'wboit' || transparency === 'dpoit') {
+            this.transparencyManager = new TransparencyPassManager(context);
+            this.initializeTransparencyManager();
+        }
+    }
+
+    private initializeTransparencyManager(): void {
+        if (!this.transparencyManager) return;
+
+        const config: TransparencyPassConfig = {
+            mode: this.transparencyMode as 'wboit' | 'dpoit',
+            dpoitPasses: 4,
+            includeBackfaces: true,
+        };
+        this.transparencyManager.initialize(this.width, this.height, config);
     }
 
     get transparency(): TransparencyMode {
@@ -61,14 +80,34 @@ export class WebGPUDrawPass {
     }
 
     setTransparency(transparency: TransparencyMode): void {
+        if (this.transparencyMode === transparency) return;
+
         this.transparencyMode = transparency;
+
+        // Update transparency manager
+        if (transparency === 'wboit' || transparency === 'dpoit') {
+            if (!this.transparencyManager) {
+                this.transparencyManager = new TransparencyPassManager(this.context);
+            }
+            this.initializeTransparencyManager();
+        } else {
+            // Clean up transparency manager if not needed
+            if (this.transparencyManager) {
+                this.transparencyManager.dispose();
+                this.transparencyManager = null;
+            }
+        }
     }
 
     /**
      * Get byte count of all GPU resources used by this pass.
      */
     getByteCount(): number {
-        return this.colorTarget.getByteCount();
+        let bytes = this.colorTarget.getByteCount();
+        if (this.transparencyManager) {
+            bytes += this.transparencyManager.getByteCount();
+        }
+        return bytes;
     }
 
     /**
@@ -99,6 +138,11 @@ export class WebGPUDrawPass {
             filter: 'linear',
         };
         (this as any).colorTarget = this.context.createRenderTarget(options);
+
+        // Resize transparency manager if active
+        if (this.transparencyManager) {
+            this.initializeTransparencyManager();
+        }
     }
 
     /**
@@ -159,13 +203,95 @@ export class WebGPUDrawPass {
         if (scene.getTransparentRenderables().length > 0) {
             if (this.transparencyMode === 'blended') {
                 renderer.renderTransparent(scene, camera, passEncoder);
+            } else if (this.transparencyMode === 'wboit' && this.transparencyManager) {
+                // End current pass to prepare for WBOIT
+                passEncoder.end();
+                this.renderWBOIT(ctx, encoder, colorView);
+                return; // WBOIT handles its own submission
+            } else if (this.transparencyMode === 'dpoit' && this.transparencyManager) {
+                // End current pass to prepare for DPOIT
+                passEncoder.end();
+                this.renderDPOIT(ctx, encoder, colorView);
+                return; // DPOIT handles its own submission
             }
-            // TODO: Implement WBOIT and DPOIT modes
         }
 
         passEncoder.end();
 
         // Submit commands
+        this.context.submit([encoder.finish()]);
+
+        if (isTimingMode) console.timeEnd('WebGPUDrawPass.render');
+    }
+
+    /**
+     * Render transparent objects using WBOIT (Weighted Blended Order-Independent Transparency).
+     */
+    private renderWBOIT(ctx: RenderContext, encoder: import('../gpu').CommandEncoder, colorView: TextureView): void {
+        if (!this.transparencyManager) return;
+
+        const { renderer, camera, scene } = ctx;
+
+        // Phase 1: Accumulation pass - render transparent objects to accumulation and revealage buffers
+        const accumPass = this.transparencyManager.beginWboitAccumulationPass(encoder);
+        if (accumPass) {
+            accumPass.setViewport(0, 0, this.width, this.height, 0, 1);
+            renderer.renderTransparent(scene, camera, accumPass);
+            accumPass.end();
+        }
+
+        // Phase 2: Composite pass - blend WBOIT result onto main color buffer
+        const compositePass = encoder.beginRenderPass({
+            colorAttachments: [{
+                view: colorView,
+                loadOp: 'load', // Preserve opaque rendering
+                storeOp: 'store',
+            }],
+            label: 'wboit-composite',
+        });
+
+        this.transparencyManager.compositeWboit(compositePass);
+        compositePass.end();
+
+        // Submit all commands
+        this.context.submit([encoder.finish()]);
+
+        if (isTimingMode) console.timeEnd('WebGPUDrawPass.render');
+    }
+
+    /**
+     * Render transparent objects using DPOIT (Depth Peeling Order-Independent Transparency).
+     */
+    private renderDPOIT(ctx: RenderContext, encoder: import('../gpu').CommandEncoder, colorView: TextureView): void {
+        if (!this.transparencyManager) return;
+
+        const { renderer, camera, scene } = ctx;
+        const numPasses = 4; // Number of depth peels
+
+        // Multiple peel passes
+        for (let i = 0; i < numPasses; i++) {
+            const peelPass = this.transparencyManager.beginDpoitPeelPass(encoder, i);
+            if (peelPass) {
+                peelPass.setViewport(0, 0, this.width, this.height, 0, 1);
+                renderer.renderTransparent(scene, camera, peelPass);
+                peelPass.end();
+            }
+        }
+
+        // Composite all peels onto the main color buffer
+        const compositePass = encoder.beginRenderPass({
+            colorAttachments: [{
+                view: colorView,
+                loadOp: 'load', // Preserve opaque rendering
+                storeOp: 'store',
+            }],
+            label: 'dpoit-composite',
+        });
+
+        this.transparencyManager.compositeDpoit(compositePass);
+        compositePass.end();
+
+        // Submit all commands
         this.context.submit([encoder.finish()]);
 
         if (isTimingMode) console.timeEnd('WebGPUDrawPass.render');

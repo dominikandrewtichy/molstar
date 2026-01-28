@@ -137,9 +137,11 @@ export interface Texture {
 
     /**
      * Write data to the texture.
+     * Supports ArrayBufferView for raw pixel data, or image sources (ImageBitmap, HTMLCanvasElement, HTMLImageElement)
+     * for direct GPU upload.
      */
     write(
-        data: ArrayBufferView,
+        data: ArrayBufferView | ImageBitmap | HTMLCanvasElement | HTMLImageElement | ImageData,
         options?: {
             origin?: [number, number, number];
             size?: [number, number, number];

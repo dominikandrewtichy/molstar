@@ -396,19 +396,61 @@ export class WebGPUPickBuffers {
         this.ready = false;
         this.readTimestamp = now();
 
-        // Note: In a real implementation, this would copy from pick textures to buffers
-        // and use buffer mapping. This is a simplified version.
-        // The pickPass provides the textures, viewportX/Y provide the copy origin.
+        // Use the context's readPixelsAsync if available
+        if (this.context.readPixelsAsync) {
+            this.readPromise = this._performAsyncRead();
+            await this.readPromise;
+        } else {
+            // Fallback for contexts without async read support
+            this.ready = true;
+        }
+    }
 
-        // TODO: Implement proper async readback using:
-        // - this.pickPass to get pick textures
-        // - this.viewportX, this.viewportY as copy origin
-        // - copyTextureToBuffer + mapAsync
-        void this.pickPass;
-        void this.viewportX;
-        void this.viewportY;
+    private async _performAsyncRead(): Promise<void> {
+        if (!this.context.readPixelsAsync) return;
 
-        this.ready = true;
+        try {
+            // Read all four pick textures
+            const [objectData, instanceData, groupData, depthData] = await Promise.all([
+                this._readPickTexture('object'),
+                this._readPickTexture('instance'),
+                this._readPickTexture('group'),
+                this._readPickTexture('depth'),
+            ]);
+
+            // Copy data to CPU-side buffers
+            if (this.object && objectData) this.object.set(objectData);
+            if (this.instance && instanceData) this.instance.set(instanceData);
+            if (this.group && groupData) this.group.set(groupData);
+            if (this.depth && depthData) this.depth.set(depthData);
+
+            this.ready = true;
+        } catch (error) {
+            console.error('Failed to read picking data:', error);
+            this.ready = false;
+        }
+    }
+
+    private async _readPickTexture(type: 'object' | 'instance' | 'group' | 'depth'): Promise<Uint8Array | null> {
+        if (!this.context.readPixelsAsync) return null;
+
+        let texture: Texture | null = null;
+        switch (type) {
+            case 'object': texture = this.pickPass['objectPickTexture']; break;
+            case 'instance': texture = this.pickPass['instancePickTexture']; break;
+            case 'group': texture = this.pickPass['groupPickTexture']; break;
+            case 'depth': texture = this.pickPass['depthPickTexture']; break;
+        }
+
+        if (!texture) return null;
+
+        return this.context.readPixelsAsync(
+            texture,
+            this.viewportX,
+            this.viewportY,
+            this.viewportWidth,
+            this.viewportHeight
+        );
     }
 
     /**

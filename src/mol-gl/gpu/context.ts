@@ -144,6 +144,11 @@ export interface GPUContext {
 
     // Pixel reading
     readPixels(x: number, y: number, width: number, height: number, buffer: Uint8Array | Float32Array | Int32Array): void;
+    /**
+     * Async pixel reading for WebGPU.
+     * Reads pixels from a texture asynchronously using buffer mapping.
+     */
+    readPixelsAsync?(source: Texture, x: number, y: number, width: number, height: number): Promise<Uint8Array>;
 
     // Lifecycle
     readonly isContextLost: boolean;

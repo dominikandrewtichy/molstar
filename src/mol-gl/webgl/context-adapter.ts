@@ -791,7 +791,7 @@ class WebGLAdapterTexture implements Texture {
     }
 
     write(
-        data: ArrayBufferView,
+        data: ArrayBufferView | ImageBitmap | HTMLCanvasElement | HTMLImageElement | ImageData,
         options?: {
             origin?: [number, number, number];
             size?: [number, number, number];
@@ -811,10 +811,22 @@ class WebGLAdapterTexture implements Texture {
         gl.bindTexture(this._target, this._texture);
 
         if (this._target === gl.TEXTURE_2D) {
-            gl.texSubImage2D(gl.TEXTURE_2D, mipLevel, origin[0], origin[1], size[0], size[1], format, type, data as ArrayBufferView<ArrayBuffer>);
+            // Handle image sources (ImageBitmap, HTMLCanvasElement, HTMLImageElement, ImageData)
+            if (data instanceof ImageBitmap || data instanceof HTMLCanvasElement ||
+                data instanceof HTMLImageElement || data instanceof ImageData) {
+                gl.texSubImage2D(gl.TEXTURE_2D, mipLevel, origin[0], origin[1], format, type, data as ImageBitmap);
+            } else {
+                gl.texSubImage2D(gl.TEXTURE_2D, mipLevel, origin[0], origin[1], size[0], size[1], format, type, data as ArrayBufferView<ArrayBuffer>);
+            }
         } else if (isWebGL2(gl)) {
             const gl2 = gl as WebGL2RenderingContext;
-            gl2.texSubImage3D(this._target, mipLevel, origin[0], origin[1], origin[2], size[0], size[1], size[2], format, type, data as ArrayBufferView<ArrayBuffer>);
+            // Handle image sources for 3D textures
+            if (data instanceof ImageBitmap || data instanceof HTMLCanvasElement ||
+                data instanceof HTMLImageElement || data instanceof ImageData) {
+                gl2.texSubImage3D(this._target, mipLevel, origin[0], origin[1], origin[2], size[0], size[1], size[2], format, type, data as ImageBitmap);
+            } else {
+                gl2.texSubImage3D(this._target, mipLevel, origin[0], origin[1], origin[2], size[0], size[1], size[2], format, type, data as ArrayBufferView<ArrayBuffer>);
+            }
         }
 
         gl.bindTexture(this._target, null);

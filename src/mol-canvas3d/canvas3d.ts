@@ -16,7 +16,7 @@ import { GraphicsRenderObject } from '../mol-gl/render-object';
 import { DefaultTrackballControlsAttribs, TrackballControls, TrackballControlsParams } from './controls/trackball';
 import { Viewport } from './camera/util';
 import { createContext, WebGLContext, getGLContext } from '../mol-gl/webgl/context';
-import { GPUBackend, isWebGLBackedContext } from '../mol-gl/gpu/context';
+import { GPUContext, GPUBackend, isWebGLBackedContext } from '../mol-gl/gpu/context';
 import { createGPUContext } from '../mol-gl/gpu/context-factory';
 import { Representation } from '../mol-repr/representation';
 import { Scene } from '../mol-gl/scene';
@@ -137,6 +137,8 @@ export { Canvas3DContext };
 interface Canvas3DContext {
     readonly canvas?: HTMLCanvasElement
     readonly webgl: WebGLContext
+    /** GPU context (abstracted WebGL/WebGPU) */
+    readonly gpuContext?: GPUContext
     readonly input: InputObserver
     readonly passes: Passes
     readonly attribs: Readonly<Canvas3DContext.Attribs>
@@ -380,14 +382,14 @@ namespace Canvas3DContext {
             }
         );
 
-        // For now, we need WebGL for the rendering pipeline
-        // Once the renderer supports GPUContext directly, this can be removed
+        // For backward compatibility, always create a WebGL context
+        // The GPU context is used for the actual rendering backend (WebGL or WebGPU)
         let webgl: WebGLContext;
         if (isWebGLBackedContext(gpuContext)) {
             webgl = gpuContext.getWebGLContext();
         } else {
-            // WebGPU backend - still need WebGL for backward compatibility
-            // This is a temporary solution during migration
+            // WebGPU backend - create a WebGL context for backward compatibility
+            // This allows the existing Canvas3D code to work while the GPU context uses WebGPU
             const gl = getGLContext(canvas, {
                 powerPreference,
                 failIfMajorPerformanceCaveat,
@@ -471,6 +473,7 @@ namespace Canvas3DContext {
         return {
             canvas,
             webgl,
+            gpuContext,
             input,
             passes,
             attribs: a,

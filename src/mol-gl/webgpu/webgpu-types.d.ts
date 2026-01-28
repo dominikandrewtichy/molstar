@@ -138,6 +138,11 @@ interface GPUQueue {
         dataLayout: GPUImageDataLayout,
         size: GPUExtent3DStrict
     ): void;
+    copyExternalImageToTexture(
+        source: GPUImageCopyExternalImage,
+        destination: GPUImageCopyTextureTagged,
+        copySize: GPUExtent3D
+    ): void;
 }
 
 // Buffer
@@ -547,6 +552,24 @@ interface GPUImageDataLayout {
     bytesPerRow?: number;
     rowsPerImage?: number;
 }
+
+interface GPUImageCopyExternalImage {
+    source: ImageBitmap | HTMLCanvasElement | HTMLImageElement | HTMLVideoElement | OffscreenCanvas | VideoFrame;
+    origin?: GPUOrigin2D;
+    flipY?: boolean;
+}
+
+type GPUImageCopyExternalImageSource = ImageBitmap | HTMLCanvasElement | HTMLImageElement | HTMLVideoElement | OffscreenCanvas | VideoFrame;
+
+interface GPUImageCopyTextureTagged extends GPUImageCopyTexture {
+    premultipliedAlpha?: boolean;
+    colorSpace?: GPUPredefinedColorSpace;
+}
+
+type GPUPredefinedColorSpace = 'srgb' | 'display-p3';
+
+type GPUExtent3D = [number, number, number] | { width: number; height?: number; depthOrArrayLayers?: number };
+type GPUOrigin2D = [number, number] | { x?: number; y?: number };
 
 type GPUExtent3DStrict = [number, number, number] | { width: number; height?: number; depthOrArrayLayers?: number };
 type GPUOrigin3DStrict = [number, number, number] | { x?: number; y?: number; z?: number };

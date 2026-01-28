@@ -484,6 +484,36 @@ export class TransparencyPassManager {
         this.dpoitCompositePipeline = null;
         this.shaderModule = null;
     }
+
+    /**
+     * Get byte count of all GPU resources used by the transparency pass.
+     */
+    getByteCount(): number {
+        let bytes = 0;
+
+        if (this.wboitTargets) {
+            bytes += this.wboitTargets.accumulation.getByteCount();
+            bytes += this.wboitTargets.revealage.getByteCount();
+        }
+
+        if (this.dpoitTargetsPing) {
+            bytes += this.dpoitTargetsPing.frontColor.getByteCount();
+            bytes += this.dpoitTargetsPing.backColor.getByteCount();
+            bytes += this.dpoitTargetsPing.depth.getByteCount();
+        }
+
+        if (this.dpoitTargetsPong) {
+            bytes += this.dpoitTargetsPong.frontColor.getByteCount();
+            bytes += this.dpoitTargetsPong.backColor.getByteCount();
+            bytes += this.dpoitTargetsPong.depth.getByteCount();
+        }
+
+        if (this.quadVertexBuffer) {
+            bytes += this.quadVertexBuffer.getByteCount();
+        }
+
+        return bytes;
+    }
 }
 
 /**
