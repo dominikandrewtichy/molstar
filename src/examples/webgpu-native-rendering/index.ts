@@ -225,6 +225,11 @@ async function init() {
         state.context = context;
         state.startTime = performance.now();
         
+        // Initial resize FIRST - must be done before creating depth texture
+        // to ensure the canvas has proper dimensions
+        const rect = canvas.getBoundingClientRect();
+        context.resize(rect.width, rect.height);
+        
         updateStatus('Creating shader and pipeline...');
         
         // Create shader module
@@ -268,7 +273,7 @@ async function init() {
             label: 'Pipeline Layout'
         });
         
-        // Create depth texture
+        // Create depth texture AFTER resize - now it will have correct dimensions
         const { width, height } = context.getDrawingBufferSize();
         const depthTexture = context.createTexture({
             size: [width, height, 1],
@@ -289,7 +294,7 @@ async function init() {
                 module: shaderModule,
                 entryPoint: 'fs_main',
                 targets: [{
-                    format: 'bgra8unorm',
+                    format: context.preferredFormat,
                 }]
             },
             primitive: {
@@ -326,10 +331,6 @@ async function init() {
                 label: 'Depth Texture'
             });
         });
-        
-        // Initial resize
-        const rect = canvas.getBoundingClientRect();
-        context.resize(rect.width, rect.height);
         
         // Start animation
         state.rafId = requestAnimationFrame(animate);
