@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2018-2020 mol* contributors, licensed under MIT, See LICENSE file for more info.
+ * Copyright (c) 2018-2026 mol* contributors, licensed under MIT, See LICENSE file for more info.
  *
  * @author David Sehnal <david.sehnal@gmail.com>
  * @author Alexander Rose <alexander.rose@weirdbyte.de>
@@ -8,10 +8,7 @@
 import { Structure } from '../../mol-model/structure';
 import { BuiltInTrajectoryFormat } from '../../mol-plugin-state/formats/trajectory';
 import { PluginStateObject as PSO, PluginStateTransform } from '../../mol-plugin-state/objects';
-import { createPluginUI } from '../../mol-plugin-ui';
-import { renderReact18 } from '../../mol-plugin-ui/react18';
 import { PluginUIContext } from '../../mol-plugin-ui/context';
-import { PluginLayoutControlsDisplay } from '../../mol-plugin/layout';
 import { DefaultPluginUISpec, PluginUISpec } from '../../mol-plugin-ui/spec';
 import { PluginBehaviors } from '../../mol-plugin/behavior';
 import { PluginCommands } from '../../mol-plugin/commands';
@@ -27,18 +24,31 @@ import { ObjectKeys } from '../../mol-util/type-helpers';
 import './index.html';
 import { ShowButtons, StructurePreset, ViewportComponent } from './viewport';
 
+import { createElement } from 'react';
+import { renderReact18 } from '../../mol-plugin-ui/react18';
+import { Plugin } from '../../mol-plugin-ui/plugin';
+import { Canvas3DContext } from '../../mol-canvas3d/canvas3d';
+import { AssetManager } from '../../mol-util/assets';
+
 import '../../mol-plugin-ui/skin/light.scss';
 
 export { PLUGIN_VERSION as version } from '../../mol-plugin/version';
 export { setDebugMode, setProductionMode } from '../../mol-util/debug';
 export { Viewer as DockingViewer };
 
+/** GPU Backend preference for the docking viewer
+ * - 'webgl': Use WebGL (default, most compatible)
+ * - 'webgpu': Use WebGPU (requires Chrome 113+, Edge 113+, or Firefox with WebGPU enabled)
+ * - 'auto': Automatically select the best available backend
+ */
+export type GPUBackendPreference = 'webgl' | 'webgpu' | 'auto';
+
 const DefaultViewerOptions = {
     extensions: ObjectKeys({}),
     layoutIsExpanded: true,
     layoutShowControls: true,
     layoutShowRemoteState: true,
-    layoutControlsDisplay: 'reactive' as PluginLayoutControlsDisplay,
+    layoutControlsDisplay: 'reactive' as const,
     layoutShowSequence: true,
     layoutShowLog: true,
     layoutShowLeftPanel: true,
@@ -52,13 +62,20 @@ const DefaultViewerOptions = {
     volumeStreamingServer: PluginConfig.VolumeStreaming.DefaultServer.defaultValue,
     pdbProvider: PluginConfig.Download.DefaultPdbProvider.defaultValue,
     emdbProvider: PluginConfig.Download.DefaultEmdbProvider.defaultValue,
+    /** Preferred GPU backend - 'webgl' for compatibility, 'webgpu' for modern browsers, 'auto' for automatic selection */
+    preferredBackend: 'webgl' as GPUBackendPreference,
 };
 
 class Viewer {
     constructor(public plugin: PluginUIContext) {
     }
 
-    static async create(elementOrId: string | HTMLElement, colors = [Color(0x992211), Color(0xDDDDDD)], showButtons = true) {
+    static async create(
+        elementOrId: string | HTMLElement,
+        colors = [Color(0x992211), Color(0xDDDDDD)],
+        showButtons = true,
+        preferredBackend: GPUBackendPreference = 'webgl'
+    ) {
         const o = {
             ...DefaultViewerOptions, ...{
                 layoutIsExpanded: false,
@@ -73,6 +90,7 @@ class Viewer {
                 viewportShowSettings: false,
                 viewportShowSelectionMode: false,
                 viewportShowAnimation: false,
+                preferredBackend,
             }
         };
         const defaultSpec = DefaultPluginUISpec();
@@ -129,7 +147,59 @@ class Viewer {
             ? document.getElementById(elementOrId)
             : elementOrId;
         if (!element) throw new Error(`Could not get element with id '${elementOrId}'`);
-        const plugin = await createPluginUI({ target: element, spec, render: renderReact18 });
+
+        // Create the plugin context
+        const plugin = new PluginUIContext(spec);
+        await plugin.init();
+
+        // Create a canvas element for WebGPU/WebGL context
+        const canvas = document.createElement('canvas');
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+
+        // Create asset manager
+        const assetManager = new AssetManager();
+
+        // Create Canvas3DContext with the preferred backend
+        let canvas3dContext: Canvas3DContext;
+        if (preferredBackend === 'webgl') {
+            // Use synchronous path for WebGL
+            canvas3dContext = Canvas3DContext.fromCanvas(canvas, assetManager, {
+                antialias: true,
+                preserveDrawingBuffer: true,
+                powerPreference: 'high-performance',
+                handleResize: () => plugin.handleResize(),
+            });
+        } else {
+            // Use async path for WebGPU or auto selection
+            canvas3dContext = await Canvas3DContext.fromCanvasAsync(canvas, assetManager, {
+                preferredBackend: preferredBackend,
+                antialias: true,
+                preserveDrawingBuffer: true,
+                powerPreference: 'high-performance',
+                handleResize: () => plugin.handleResize(),
+            });
+        }
+
+        // Mount the plugin with the canvas context
+        const success = await plugin.mountAsync(element, {
+            canvas3dContext,
+            checkeredCanvasBackground: true,
+        });
+
+        if (!success) {
+            throw new Error('Failed to mount plugin');
+        }
+
+        // Wait for canvas3d to be initialized
+        try {
+            await plugin.canvas3dInitialized;
+        } catch {
+            // Error reported elsewhere
+        }
+
+        // Render the UI
+        renderReact18(createElement(Plugin, { plugin }), element);
 
         (plugin.customState as any) = {
             colorPalette: {

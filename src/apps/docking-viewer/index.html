@@ -25,12 +25,29 @@
             }
             var pdbqt = getParam('pdbqt', '[^&]+').trim() || '../../examples/ace2.pdbqt';
             var mol2 = getParam('mol2', '[^&]+').trim() || '../../examples/ace2-hit.mol2';
+            
+            // GPU backend preference: 'webgl' (default), 'webgpu', or 'auto'
+            var backend = getParam('backend', '[^&]+').trim() || 'webgl';
+            
+            // Validate backend parameter
+            if (backend !== 'webgl' && backend !== 'webgpu' && backend !== 'auto') {
+                console.warn('Invalid backend "' + backend + '", using "webgl". Valid options: webgl, webgpu, auto');
+                backend = 'webgl';
+            }
 
-            DockingViewer.create('app', [0x33DD22, 0x1133EE], true).then(viewer => {
+            DockingViewer.create('app', [0x33DD22, 0x1133EE], true, backend).then(viewer => {
                 viewer.loadStructuresFromUrlsAndMerge([
                     { url: pdbqt, format: 'pdbqt' },
                     { url: mol2, format: 'mol2' }
                 ]);
+            }).catch(error => {
+                console.error('Failed to initialize DockingViewer:', error);
+                document.getElementById('app').innerHTML = 
+                    '<div style="padding: 20px; color: red;">' +
+                    '<h3>Error initializing viewer</h3>' +
+                    '<p>' + (error.message || 'Unknown error') + '</p>' +
+                    '<p>If using WebGPU, please ensure your browser supports it (Chrome 113+, Edge 113+, or Firefox with webgpu enabled).</p>' +
+                    '</div>';
             });
         </script>
     </body>
