@@ -361,12 +361,18 @@ Test examples have been organized into separate directories in `src/examples/`:
 **Completed in This Session:**
 1. ✅ WebGPU Passes (`WebGPUDrawPass`, `WebGPUPickPass`, `WebGPUPasses`)
 2. ✅ WebGPU render target depth texture view support
+3. ✅ Updated `Renderer.createFromGPUContext()` to support native WebGPU contexts
+4. ✅ Updated `Passes.fromGPUContext()` to support native WebGPU contexts
+5. ✅ Added `Renderer.createSceneFromGPUContext()` factory for backend-agnostic scene creation
+6. ✅ Exported WebGPU types from `mol-gl/renderer` and `mol-gl/webgpu`
+7. ✅ Created visual regression testing framework (`mol-gl/webgpu/testing/visual-regression.ts`)
+8. ✅ Created performance benchmark framework (`mol-gl/webgpu/testing/performance.ts`)
+9. ✅ All TypeScript compilation successful
 
 **Remaining Work:**
-1. 🟡 Visual regression tests (comparison test example created, automated testing pending)
-2. Performance benchmarks
-3. Full Canvas3D integration with WebGPU passes
-4. Documentation and examples
+1. Full end-to-end Canvas3D integration test with WebGPU passes (manual testing)
+2. Documentation updates for new testing utilities
+3. Additional shader coverage for advanced features (optional)
 
 ### 13.10 WebGL Adapter Implementation
 

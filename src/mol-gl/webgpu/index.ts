@@ -21,3 +21,4 @@ export type {
 export * from './picking';
 export * from './passes';
 export * from './compute';
+export * from './testing';
