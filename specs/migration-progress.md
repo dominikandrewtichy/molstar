@@ -210,6 +210,7 @@ All renderables for Phase 4 have been ported:
   - [x] Bloom (`shader/wgsl/bloom.wgsl.ts`) - luminosity extraction, Gaussian blur, mip composite
   - [x] Outlines (`shader/wgsl/outlines.wgsl.ts`) - depth discontinuity edge detection
   - [x] Postprocessing compositor (`shader/wgsl/postprocessing.wgsl.ts`) - combines all effects
+- [x] Shadow rendering (`webgpu/postprocessing.ts`, `shader/wgsl/shadow.wgsl.ts`) - screen-space shadow approximation
 - [x] Picking system (`webgpu/picking.ts`) - MRT picking with async GPU readback
 - [x] Multi-sample anti-aliasing (`webgpu/passes.ts`):
   - [x] `WebGPUMultiSamplePass` - MSAA via temporal accumulation and camera jitter
@@ -422,6 +423,27 @@ Test examples have been organized into separate directories in `src/examples/`:
 4. ✅ Added `getByteCount()` method to `TransparencyPassManager`
 5. ✅ Implemented WBOIT transparency mode in `WebGPUDrawPass`
 6. ✅ Implemented DPOIT transparency mode in `WebGPUDrawPass`
+
+**New in This Session - Canvas3D Native WebGPU Integration:**
+1. ✅ Added `Canvas3D.createWebGPU()` factory method for native WebGPU rendering
+2. ✅ Connected native WebGPU renderer (`WebGPURenderer`) to Canvas3D
+3. ✅ Connected native WebGPU scene (`WebGPUScene`) to Canvas3D
+4. ✅ Integrated `WebGPUPasses` with native WebGPU draw pass
+5. ✅ TypeScript compilation clean with new integration
+
+**Usage Example:**
+```typescript
+// Create context with WebGPU backend
+const context = await Canvas3DContext.fromCanvasAsync(canvas, assetManager, {
+    preferredBackend: 'webgpu'
+});
+
+// Option 1: Native WebGPU path (simplified, experimental)
+const canvas3d = Canvas3D.createWebGPU(context, props);
+
+// Option 2: Standard path (WebGL compatibility layer, full features)
+const canvas3d = Canvas3D.create(context, props);
+```
 7. ✅ All TypeScript compilation successful
 
 **Remaining Work:**
@@ -429,6 +451,36 @@ Test examples have been organized into separate directories in `src/examples/`:
 2. ✅ Documentation updates for new testing utilities (see below)
 3. ✅ Font atlas upload for text rendering
 4. ✅ Visual regression and performance benchmarks (see testing framework below)
+
+---
+
+## 15. Shadow Rendering Implementation (Current Session)
+
+### Summary
+Implemented the missing shadow rendering pass for WebGPU post-processing.
+
+### Files Created
+- `src/mol-gl/shader/wgsl/shadow.wgsl.ts` - WGSL screen-space shadow shader with PCF sampling
+
+### Files Modified
+- `src/mol-gl/webgpu/postprocessing.ts` - Complete `WebGPUShadowPass` implementation
+  - Pipeline creation with shadow shader
+  - Uniform buffer management
+  - Bind group setup
+  - Screen-space shadow calculation with neighboring depth sampling
+  - Full render pass implementation
+
+### Technical Details
+- **Shadow Algorithm**: Screen-space shadow approximation using depth comparison
+- **Sampling**: 8-sample PCF (Percentage Closer Filtering) with golden angle distribution
+- **Shadow Bias**: Configurable bias to prevent shadow acne
+- **Intensity**: Adjustable shadow intensity via `ShadowParams`
+
+### Integration
+The shadow pass integrates with the post-processing pipeline:
+1. Shadow texture is sampled in `postprocessing.wgsl` (binding 5)
+2. Shadows are applied during final compositing
+3. Configurable via `ShadowParams` (color, intensity)
 
 ### 13.11 WebGL Adapter Implementation
 

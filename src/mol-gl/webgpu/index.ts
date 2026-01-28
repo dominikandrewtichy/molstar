@@ -20,8 +20,10 @@ export type {
 } from './transparency';
 export * from './picking';
 export * from './passes';
+export * from './postprocessing';
 export * from './compute';
 export * from './testing';
+export * from './renderable-factory';
 
 // WebGPU MultiSample exports
 export {
@@ -33,3 +35,21 @@ export {
 export type {
     WebGPUMultiSampleProps,
 } from './passes';
+
+// WebGPU Postprocessing exports
+export {
+    WebGPUPostprocessingPass,
+    WebGPUSsaoPass,
+    WebGPUOutlinePass,
+    WebGPUShadowPass,
+    PostprocessingParams,
+    SsaoParams,
+    OutlineParams,
+    ShadowParams,
+} from './postprocessing';
+export type {
+    PostprocessingProps,
+    SsaoProps,
+    OutlineProps,
+    ShadowProps,
+} from './postprocessing';

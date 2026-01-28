@@ -18,6 +18,11 @@ import { Viewport } from './camera/util';
 import { createContext, WebGLContext, getGLContext } from '../mol-gl/webgl/context';
 import { GPUContext, GPUBackend, isWebGLBackedContext } from '../mol-gl/gpu/context';
 import { createGPUContext } from '../mol-gl/gpu/context-factory';
+import { createWebGPURenderer } from '../mol-gl/webgpu/renderer';
+import { createWebGPUScene } from '../mol-gl/webgpu/scene';
+import { createWebGPUPasses } from '../mol-gl/webgpu/passes';
+import { createWebGPURenderableFromObject, getWebGPUTransparency } from '../mol-gl/webgpu/renderable-factory';
+import { WebGPURenderable } from '../mol-gl/webgpu/renderable';
 import { Representation } from '../mol-repr/representation';
 import { Scene } from '../mol-gl/scene';
 import { PickingId } from '../mol-geo/geometry/picking';
@@ -1694,5 +1699,336 @@ namespace Canvas3D {
             Viewport.set(controls.viewport, x, y, width, height);
             hiZ.setViewport(x, y, width, height);
         }
+    }
+
+    /**
+     * Create a Canvas3D with native WebGPU rendering.
+     * This is a simplified path that uses the native WebGPU renderer and scene
+     * instead of the WebGL compatibility layer.
+     *
+     * Note: This is an experimental API. Some features available in the standard
+     * Canvas3D.create (like advanced postprocessing, picking, and XR) may not be
+     * fully supported yet.
+     *
+     * @param ctx Canvas3DContext created with WebGPU backend via fromCanvasAsync
+     * @param props Canvas3D properties
+     * @param attribs Canvas3D attributes
+     * @returns Canvas3D instance using native WebGPU rendering
+     */
+    export function createWebGPU(
+        ctx: Canvas3DContext,
+        props: Partial<Canvas3DProps> = {},
+        attribs: Partial<Canvas3DAttribs> = {}
+    ): Canvas3D | null {
+        // Verify we have a native WebGPU context
+        if (ctx.backend !== 'webgpu' || !ctx.gpuContext || isWebGLBackedContext(ctx.gpuContext)) {
+            console.warn('Canvas3D.createWebGPU requires a native WebGPU context. Use Canvas3DContext.fromCanvasAsync with preferredBackend: "webgpu"');
+            return null;
+        }
+
+        const { gpuContext, input } = ctx;
+        if (!gpuContext) return null;
+
+        const p: Canvas3DProps = { ...deepClone(DefaultCanvas3DParams), ...deepClone(props) };
+        const a = { ...deepClone(DefaultCanvas3DAttribs), ...deepClone(attribs) };
+
+        // Create native WebGPU scene and renderer
+        const webgpuScene = createWebGPUScene(gpuContext);
+        const renderer = createWebGPURenderer(gpuContext, {
+            backgroundColor: p.renderer.backgroundColor,
+            pickingAlphaThreshold: p.renderer.pickingAlphaThreshold,
+            colorMarker: p.renderer.colorMarker,
+            highlightColor: p.renderer.highlightColor,
+            selectColor: p.renderer.selectColor,
+            dimColor: p.renderer.dimColor,
+            highlightStrength: p.renderer.highlightStrength,
+            selectStrength: p.renderer.selectStrength,
+            dimStrength: p.renderer.dimStrength,
+            markerPriority: p.renderer.markerPriority,
+            xrayEdgeFalloff: p.renderer.xrayEdgeFalloff,
+            celSteps: p.renderer.celSteps,
+            exposure: p.renderer.exposure,
+            light: p.renderer.light,
+            ambientColor: p.renderer.ambientColor,
+            ambientIntensity: p.renderer.ambientIntensity,
+        });
+
+        // Create WebGPU passes
+        const passes = createWebGPUPasses(gpuContext, {
+            pickScale: ctx.props.pickScale,
+            transparency: ctx.props.transparency,
+        });
+
+        // Set up camera
+        const drs = gpuContext.getDrawingBufferSize();
+        const camera = new Camera({
+            position: Vec3.create(0, 0, 100),
+            mode: p.camera.mode,
+            fog: p.cameraFog.name === 'on' ? p.cameraFog.params.intensity : 0,
+            clipFar: p.cameraClipping.far,
+            minNear: p.cameraClipping.minNear,
+            fov: degToRad(p.camera.fov),
+        }, { x: 0, y: 0, width: drs.width, height: drs.height });
+
+        // Set up controls - use WebGPUScene with a compatibility wrapper
+        const controls = TrackballControls.create(input, camera, webgpuScene as any, p.trackball, a.trackball);
+
+        // Track representations and their renderables
+        const reprRenderables = new Map<Representation.Any, Map<GraphicsRenderObject, WebGPURenderable>>();
+        const transparency = getWebGPUTransparency(ctx.props.transparency);
+
+        // Animation state
+        let animationFrameHandle = 0;
+        let currentTime = 0;
+        let forceNextRender = true;
+        let drawPaused = false;
+        const didDraw = new BehaviorSubject<now.Timestamp>(0 as now.Timestamp);
+        const commited = new BehaviorSubject<now.Timestamp>(0 as now.Timestamp);
+        const commitQueueSize = new BehaviorSubject<number>(0);
+        const reprCount = new BehaviorSubject<number>(0);
+        const resized = new BehaviorSubject<any>(0);
+
+        // Simple render loop for WebGPU
+        function render() {
+            // Update renderer
+            renderer.update(camera, webgpuScene);
+
+            // Render via WebGPU draw pass
+            passes.draw.render(
+                { renderer, camera, scene: webgpuScene },
+                { transparentBackground: p.transparentBackground },
+                true
+            );
+        }
+
+        function draw() {
+            if (drawPaused) return;
+            controls.update(currentTime);
+            camera.update();
+            if (forceNextRender) {
+                render();
+                forceNextRender = false;
+                didDraw.next(now() as now.Timestamp);
+            }
+        }
+
+        function animate() {
+            animationFrameHandle = requestAnimationFrame((t) => {
+                currentTime = t;
+                draw();
+                animate();
+            });
+        }
+
+        function tick(t: now.Timestamp, options?: { isSynchronous?: boolean, manualDraw?: boolean }) {
+            currentTime = t;
+            if (!options?.manualDraw) {
+                draw();
+            }
+        }
+
+        function commit() {
+            if (webgpuScene.needsCommit) {
+                webgpuScene.commit();
+                commitQueueSize.next(webgpuScene.commitQueueSize);
+                commited.next(now() as now.Timestamp);
+            }
+        }
+
+        // Start animation loop
+        animate();
+
+        // Return Canvas3D interface with WebGPU backend
+        return {
+            webgl: ctx.webgl, // Required by interface but not used for rendering
+
+            add: (repr: Representation.Any) => {
+                let renderablesMap = reprRenderables.get(repr);
+                if (!renderablesMap) {
+                    renderablesMap = new Map<GraphicsRenderObject, WebGPURenderable>();
+                    reprRenderables.set(repr, renderablesMap);
+                }
+
+                // Add new render objects
+                repr.renderObjects.forEach(ro => {
+                    if (!renderablesMap!.has(ro)) {
+                        const renderable = createWebGPURenderableFromObject(gpuContext!, ro, transparency);
+                        if (renderable) {
+                            webgpuScene.add(ro, renderable);
+                            renderablesMap!.set(ro, renderable);
+                        }
+                    }
+                });
+
+                reprCount.next(reprRenderables.size);
+                forceNextRender = true;
+            },
+
+            remove: (repr: Representation.Any) => {
+                const renderablesMap = reprRenderables.get(repr);
+                if (renderablesMap) {
+                    renderablesMap.forEach((renderable, ro) => {
+                        webgpuScene.remove(ro);
+                    });
+                    reprRenderables.delete(repr);
+                    reprCount.next(reprRenderables.size);
+                    forceNextRender = true;
+                }
+            },
+
+            commit,
+
+            update: (repr?: Representation.Any, keepSphere?: boolean) => {
+                if (repr) {
+                    // Update specific representation
+                    const renderablesMap = reprRenderables.get(repr);
+                    if (renderablesMap) {
+                        // Remove old renderables
+                        renderablesMap.forEach((renderable, ro) => {
+                            webgpuScene.remove(ro);
+                        });
+                        renderablesMap.clear();
+
+                        // Re-add with new render objects
+                        repr.renderObjects.forEach(ro => {
+                            const renderable = createWebGPURenderableFromObject(gpuContext!, ro, transparency);
+                            if (renderable) {
+                                webgpuScene.add(ro, renderable);
+                                renderablesMap.set(ro, renderable);
+                            }
+                        });
+                    }
+                } else {
+                    // Update all renderables
+                    webgpuScene.update();
+                }
+                forceNextRender = true;
+            },
+
+            clear: () => {
+                reprRenderables.forEach((renderablesMap) => {
+                    renderablesMap.forEach((renderable, ro) => {
+                        webgpuScene.remove(ro);
+                    });
+                });
+                reprRenderables.clear();
+                webgpuScene.clear();
+                forceNextRender = true;
+                reprCount.next(0);
+            },
+
+            syncVisibility: () => {
+                if (webgpuScene.syncVisibility()) {
+                    forceNextRender = true;
+                }
+            },
+
+            requestDraw: () => { forceNextRender = true; },
+            tick,
+            animate: () => { /* Already animating */ },
+            resetTime: () => {},
+            pause: () => { drawPaused = true; },
+            resume: () => { drawPaused = false; },
+
+            requestAnimationFrame: (cb: FrameRequestCallback) => requestAnimationFrame(cb),
+            cancelAnimationFrame: (handle: number) => cancelAnimationFrame(handle),
+
+            identify: () => undefined,
+            asyncIdentify: () => undefined,
+            mark: () => {},
+            getLoci: () => EmptyLoci,
+
+            handleResize: () => {
+                const drs = gpuContext.getDrawingBufferSize();
+                passes.draw.setSize(drs.width, drs.height);
+                camera.viewport.width = drs.width;
+                camera.viewport.height = drs.height;
+                forceNextRender = true;
+                resized.next(+new Date());
+            },
+
+            requestResize: () => { forceNextRender = true; },
+
+            requestCameraReset: () => {
+                camera.setState({
+                    target: Vec3.create(0, 0, 0),
+                    position: Vec3.create(0, 0, 100),
+                }, 250);
+            },
+
+            camera,
+            boundingSphere: webgpuScene.getBoundingSphere(),
+            boundingSphereVisible: webgpuScene.getBoundingSphereVisible(),
+            notifyDidDraw: true,
+            didDraw,
+            commited,
+            commitQueueSize,
+            reprCount,
+            resized,
+
+            setProps: (newProps: Partial<Canvas3DProps> | ((old: Canvas3DProps) => Partial<Canvas3DProps> | void)) => {
+                if (typeof newProps === 'function') {
+                    // Not supported in simplified version
+                } else if (newProps) {
+                    if (newProps.camera?.mode) {
+                        camera.setState({ mode: newProps.camera.mode }, 0);
+                    }
+                    if (newProps.transparentBackground !== undefined) {
+                        p.transparentBackground = newProps.transparentBackground;
+                    }
+                    if (newProps.renderer) {
+                        renderer.setProps(newProps.renderer);
+                    }
+                }
+                forceNextRender = true;
+            },
+
+            setAttribs: () => {},
+
+            getImagePass: () => { throw new Error('getImagePass not implemented for WebGPU'); },
+
+            getRenderObjects: () => {
+                const renderObjects: GraphicsRenderObject[] = [];
+                reprRenderables.forEach((renderablesMap) => {
+                    renderablesMap.forEach((_, ro) => {
+                        renderObjects.push(ro);
+                    });
+                });
+                return renderObjects;
+            },
+
+            props: p as any,
+            attribs: a as any,
+            input,
+            stats: renderer.getStats(),
+            interaction: { hover: new Subject(), drag: new Subject(), click: new Subject() } as any,
+
+            xr: {
+                request: async () => {},
+                end: async () => {},
+                isSupported: new BehaviorSubject(false),
+                isPresenting: new BehaviorSubject(false),
+                requestFailed: new Subject<string>(),
+            },
+
+            dispose: () => {
+                cancelAnimationFrame(animationFrameHandle);
+                reprRenderables.forEach((renderablesMap) => {
+                    renderablesMap.forEach((renderable) => {
+                        renderable.dispose();
+                    });
+                });
+                reprRenderables.clear();
+                renderer.dispose();
+                passes.dispose();
+                webgpuScene.clear();
+
+                didDraw.complete();
+                commited.complete();
+                commitQueueSize.complete();
+                reprCount.complete();
+                resized.complete();
+            },
+        } as unknown as Canvas3D;
     }
 }
