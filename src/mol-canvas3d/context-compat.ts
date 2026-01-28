@@ -133,7 +133,11 @@ export async function createCanvas3DContextCompat(
         // WebGPU backend - still need a WebGLContext for the Passes system
         // This is a temporary solution during migration
         // Eventually, Passes will be updated to use GPUContext directly
-        const gl = getGLContext(canvas, {
+        // Use an offscreen canvas since the main canvas already has a WebGPU context
+        const offscreenCanvas = document.createElement('canvas');
+        offscreenCanvas.width = 1;
+        offscreenCanvas.height = 1;
+        const gl = getGLContext(offscreenCanvas, {
             powerPreference: a.powerPreference,
             failIfMajorPerformanceCaveat: a.failIfMajorPerformanceCaveat,
             antialias: a.antialias,

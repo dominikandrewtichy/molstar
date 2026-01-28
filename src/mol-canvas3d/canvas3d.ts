@@ -390,7 +390,11 @@ namespace Canvas3DContext {
         } else {
             // WebGPU backend - create a WebGL context for backward compatibility
             // This allows the existing Canvas3D code to work while the GPU context uses WebGPU
-            const gl = getGLContext(canvas, {
+            // Use an offscreen canvas since the main canvas already has a WebGPU context
+            const offscreenCanvas = document.createElement('canvas');
+            offscreenCanvas.width = 1;
+            offscreenCanvas.height = 1;
+            const gl = getGLContext(offscreenCanvas, {
                 powerPreference,
                 failIfMajorPerformanceCaveat,
                 antialias,
