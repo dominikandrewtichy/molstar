@@ -11,6 +11,7 @@ import { WebGLContext } from '../../mol-gl/webgl/context';
 import { GPUContext, isWebGLBackedContext } from '../../mol-gl/gpu/context';
 import { AssetManager } from '../../mol-util/assets';
 import { IlluminationPass } from './illumination';
+import { createWebGPUPasses, WebGPUPasses } from '../../mol-gl/webgpu/passes';
 
 export class Passes {
     readonly draw: DrawPass;
@@ -20,14 +21,15 @@ export class Passes {
 
     /**
      * Create Passes from a GPUContext.
-     * Currently requires a WebGL-backed context.
-     * @deprecated Use constructor with WebGLContext directly for now.
+     * Supports both WebGL-backed contexts and native WebGPU contexts.
+     * Automatically selects the appropriate backend based on the context type.
      */
-    static fromGPUContext(gpuCtx: GPUContext, assetManager: AssetManager, attribs: Partial<{ pickScale: number, transparency: 'wboit' | 'dpoit' | 'blended' }> = {}): Passes {
-        if (!isWebGLBackedContext(gpuCtx)) {
-            throw new Error('Passes currently only supports WebGL-backed GPUContext. WebGPU native passes are in progress.');
+    static fromGPUContext(gpuCtx: GPUContext, assetManager: AssetManager, attribs: Partial<{ pickScale: number, transparency: 'wboit' | 'dpoit' | 'blended' }> = {}): Passes | WebGPUPasses {
+        if (isWebGLBackedContext(gpuCtx)) {
+            return new Passes(gpuCtx.getWebGLContext(), assetManager, attribs);
         }
-        return new Passes(gpuCtx.getWebGLContext(), assetManager, attribs);
+        // Native WebGPU passes
+        return createWebGPUPasses(gpuCtx, attribs);
     }
 
     constructor(private webgl: WebGLContext, assetManager: AssetManager, attribs: Partial<{ pickScale: number, transparency: 'wboit' | 'dpoit' | 'blended' }> = {}) {

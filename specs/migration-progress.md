@@ -358,10 +358,15 @@ Test examples have been organized into separate directories in `src/examples/`:
 - ✅ WebGPU native Renderer (`webgpu/renderer.ts`)
 - ✅ WebGPU native Scene (`webgpu/scene.ts`)
 
+**Completed in This Session:**
+1. ✅ WebGPU Passes (`WebGPUDrawPass`, `WebGPUPickPass`, `WebGPUPasses`)
+2. ✅ WebGPU render target depth texture view support
+
 **Remaining Work:**
 1. 🟡 Visual regression tests (comparison test example created, automated testing pending)
 2. Performance benchmarks
-3. Documentation and examples
+3. Full Canvas3D integration with WebGPU passes
+4. Documentation and examples
 
 ### 13.10 WebGL Adapter Implementation
 
@@ -608,4 +613,40 @@ renderer.renderTransparent(scene, camera, passEncoder);
 
 passEncoder.end();
 gpuContext.submit([encoder.finish()]);
+```
+
+### 13.17 WebGPU Passes
+
+WebGPU-native pass implementations for the rendering pipeline:
+
+#### WebGPU DrawPass (`webgpu/passes.ts`)
+| Component | Status | Description |
+|-----------|--------|-------------|
+| `WebGPUDrawPass` | ✅ | Main draw pass with color and depth targets |
+| `WebGPUPickPass` | ✅ | Picking pass for object/instance/group selection |
+| `WebGPUPasses` | ✅ | Container for all WebGPU passes |
+| `createWebGPUPasses()` | ✅ | Factory function for creating passes |
+
+**Key Features:**
+- Render target management with depth buffers
+- Support for blended transparency
+- Integration with WebGPU renderer and scene
+- Compatible with GPUContext abstraction
+
+**Usage Example:**
+```typescript
+import { createWebGPUPasses } from './webgpu/passes';
+
+// Create passes
+const passes = createWebGPUPasses(gpuContext, {
+    transparency: 'blended',
+    pickScale: 0.25,
+});
+
+// Render
+passes.draw.render({
+    renderer,
+    camera,
+    scene,
+}, { transparentBackground: false }, true);
 ```

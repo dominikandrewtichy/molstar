@@ -19,3 +19,5 @@ export type {
     TransparencyMode as TransparencyPassMode
 } from './transparency';
 export * from './picking';
+export * from './passes';
+export * from './compute';

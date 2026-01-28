@@ -1491,6 +1491,39 @@ class WebGPURenderTarget implements RenderTarget {
         return this._textureView!;
     }
 
+    /**
+     * Get the depth texture view for use as a depth-stencil attachment.
+     * Returns null if this render target was created without depth.
+     */
+    get depthTextureView(): TextureView | null {
+        if (!this._depthTexture) return null;
+        if (!this._depthTextureView) {
+            const self = this;
+            // Create wrapper texture for the depth texture
+            const wrapperTexture: Texture = {
+                id: createTextureId(),
+                width: this._width,
+                height: this._height,
+                depth: 1,
+                format: 'depth32float',
+                dimension: '2d' as const,
+                mipLevelCount: 1,
+                sampleCount: 1,
+                write: () => {},
+                getByteCount: () => this._width * this._height * 4,
+                reset: () => self._initialize(),
+                destroy: () => {},
+                createView: () => self._depthTextureView!,
+            };
+            this._depthTextureView = new WebGPUTextureView(
+                this._depthTexture.createView(),
+                wrapperTexture
+            );
+        }
+        return this._depthTextureView;
+    }
+    private _depthTextureView: TextureView | null = null;
+
     getByteCount(): number {
         const colorBytes = this._width * this._height * (this._type === 'float32' ? 16 : (this._type === 'fp16' ? 8 : 4));
         const depthBytes = this._depth ? this._width * this._height * 4 : 0;

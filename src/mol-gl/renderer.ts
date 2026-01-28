@@ -16,6 +16,12 @@ import { Color } from '../mol-util/color';
 import { ValueCell, deepEqual } from '../mol-util';
 import { GlobalUniformValues } from './renderable/schema';
 import { GraphicsRenderVariant } from './webgl/render-item';
+import { createWebGPURenderer, WebGPURenderer } from './webgpu/renderer';
+import { createWebGPUScene, WebGPUScene } from './webgpu/scene';
+
+// Re-export WebGPU renderer and scene for direct access
+export { createWebGPURenderer, WebGPURenderer } from './webgpu/renderer';
+export { createWebGPUScene, WebGPUScene } from './webgpu/scene';
 import { ParamDefinition as PD } from '../mol-util/param-definition';
 import { degToRad } from '../mol-math/misc';
 import { Texture, Textures } from './webgl/texture';
@@ -174,14 +180,27 @@ namespace Renderer {
 
     /**
      * Create a Renderer from a GPUContext.
-     * Currently requires a WebGL-backed context (uses getWebGLContext internally).
-     * @deprecated Use create(webglContext) directly for now. This will be updated to work with WebGPU.
+     * Supports both WebGL-backed contexts and native WebGPU contexts.
+     * Automatically selects the appropriate backend based on the context type.
      */
-    export function createFromGPUContext(gpuCtx: GPUContext, props: Partial<RendererProps> = {}): Renderer {
-        if (!isWebGLBackedContext(gpuCtx)) {
-            throw new Error('Renderer currently only supports WebGL-backed GPUContext. WebGPU native rendering is in progress.');
+    export function createFromGPUContext(gpuCtx: GPUContext, props: Partial<RendererProps> = {}): Renderer | WebGPURenderer {
+        if (isWebGLBackedContext(gpuCtx)) {
+            return create(gpuCtx.getWebGLContext(), props);
         }
-        return create(gpuCtx.getWebGLContext(), props);
+        // Native WebGPU rendering
+        return createWebGPURenderer(gpuCtx, props);
+    }
+
+    /**
+     * Create a Scene from a GPUContext.
+     * Supports both WebGL-backed contexts and native WebGPU contexts.
+     */
+    export function createSceneFromGPUContext(gpuCtx: GPUContext, transparency: 'blended' | 'wboit' | 'dpoit' = 'blended'): Scene | WebGPUScene {
+        if (isWebGLBackedContext(gpuCtx)) {
+            return Scene.create(gpuCtx.getWebGLContext(), transparency);
+        }
+        // Native WebGPU scene
+        return createWebGPUScene(gpuCtx);
     }
 
     export function create(ctx: WebGLContext, props: Partial<RendererProps> = {}): Renderer {
