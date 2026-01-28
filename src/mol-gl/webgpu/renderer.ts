@@ -211,9 +211,9 @@ export class WebGPURenderer {
     private createUniformBuffers() {
         // Create frame uniform buffer (aligned to 16 bytes)
         const frameUniformSize = 16 * 4 * 4 + // 4 matrices (16 floats each)
-                                 3 * 4 + 4 +   // cameraPosition (vec3 + padding)
-                                 3 * 4 + 4 +   // cameraDir (vec3 + padding)
-                                 4 * 4;        // near, far, pixelRatio, time
+                                 3 * 4 + 4 + // cameraPosition (vec3 + padding)
+                                 3 * 4 + 4 + // cameraDir (vec3 + padding)
+                                 4 * 4; // near, far, pixelRatio, time
 
         this.frameUniformBuffer = this.context.createBuffer({
             size: frameUniformSize,
@@ -379,6 +379,9 @@ export class WebGPURenderer {
 
         const renderables = scene.getPickableRenderables();
         for (const renderable of renderables) {
+            // Skip based on pickType
+            if (pickType === PickType.Object && !renderable.state.pickable) continue;
+            // For Instance and Group pick types, we still render but the shader handles the output
             this.renderRenderable(renderable, 'pick', passEncoder);
         }
 
@@ -400,6 +403,138 @@ export class WebGPURenderer {
         }
 
         if (isTimingMode) console.timeEnd('WebGPURenderer.renderDepth');
+    }
+
+    /**
+     * Render depth pass for opaque objects only.
+     */
+    renderDepthOpaque(scene: WebGPUScene, camera: ICamera, passEncoder: RenderPassEncoder): void {
+        if (isTimingMode) console.time('WebGPURenderer.renderDepthOpaque');
+
+        this.context.state.disableBlend();
+        this.context.state.enableDepthTest();
+        this.context.state.depthMask(true);
+
+        for (const renderable of scene.getOpaqueRenderables()) {
+            this.renderRenderable(renderable, 'depth', passEncoder);
+        }
+
+        if (isTimingMode) console.timeEnd('WebGPURenderer.renderDepthOpaque');
+    }
+
+    /**
+     * Render depth pass for transparent objects only.
+     */
+    renderDepthTransparent(scene: WebGPUScene, camera: ICamera, passEncoder: RenderPassEncoder): void {
+        if (isTimingMode) console.time('WebGPURenderer.renderDepthTransparent');
+
+        this.context.state.disableBlend();
+        this.context.state.enableDepthTest();
+        this.context.state.depthMask(true);
+
+        for (const renderable of scene.getTransparentRenderables()) {
+            this.renderRenderable(renderable, 'depth', passEncoder);
+        }
+
+        if (isTimingMode) console.timeEnd('WebGPURenderer.renderDepthTransparent');
+    }
+
+    /**
+     * Render marking depth pass (for outline rendering).
+     */
+    renderMarkingDepth(scene: WebGPUScene, camera: ICamera, passEncoder: RenderPassEncoder): void {
+        if (isTimingMode) console.time('WebGPURenderer.renderMarkingDepth');
+
+        this.context.state.disableBlend();
+        this.context.state.enableDepthTest();
+        this.context.state.depthMask(true);
+
+        // Render objects that have marking (highlight/select)
+        for (const renderable of scene.getAllRenderables()) {
+            // Check if renderable has any marking
+            const markerAverage = renderable.values.markerAverage?.ref.value ?? 0;
+            if (markerAverage > 0 && markerAverage < 1) {
+                this.renderRenderable(renderable, 'marking', passEncoder);
+            }
+        }
+
+        if (isTimingMode) console.timeEnd('WebGPURenderer.renderMarkingDepth');
+    }
+
+    /**
+     * Render marking mask pass.
+     */
+    renderMarkingMask(scene: WebGPUScene, camera: ICamera, passEncoder: RenderPassEncoder): void {
+        if (isTimingMode) console.time('WebGPURenderer.renderMarkingMask');
+
+        this.context.state.disableBlend();
+        this.context.state.enableDepthTest();
+        this.context.state.depthMask(true);
+
+        // Render only objects with marking
+        for (const renderable of scene.getAllRenderables()) {
+            const markerAverage = renderable.values.markerAverage?.ref.value ?? 0;
+            if (markerAverage > 0) {
+                this.renderRenderable(renderable, 'marking', passEncoder);
+            }
+        }
+
+        if (isTimingMode) console.timeEnd('WebGPURenderer.renderMarkingMask');
+    }
+
+    /**
+     * Render emissive pass (for bloom).
+     */
+    renderEmissive(scene: WebGPUScene, camera: ICamera, passEncoder: RenderPassEncoder): void {
+        if (isTimingMode) console.time('WebGPURenderer.renderEmissive');
+
+        this.context.state.disableBlend();
+        this.context.state.enableDepthTest();
+        this.context.state.depthMask(true);
+
+        // Render objects with emissive properties
+        for (const renderable of scene.getOpaqueRenderables()) {
+            this.renderRenderable(renderable, 'emissive', passEncoder);
+        }
+
+        if (isTimingMode) console.timeEnd('WebGPURenderer.renderEmissive');
+    }
+
+    /**
+     * Render tracing pass (for path tracing).
+     */
+    renderTracing(scene: WebGPUScene, camera: ICamera, passEncoder: RenderPassEncoder): void {
+        if (isTimingMode) console.time('WebGPURenderer.renderTracing');
+
+        this.context.state.disableBlend();
+        this.context.state.enableDepthTest();
+        this.context.state.depthMask(true);
+
+        for (const renderable of scene.getOpaqueRenderables()) {
+            this.renderRenderable(renderable, 'tracing', passEncoder);
+        }
+
+        if (isTimingMode) console.timeEnd('WebGPURenderer.renderTracing');
+    }
+
+    /**
+     * Render volume pass (for direct volume rendering).
+     */
+    renderVolume(scene: WebGPUScene, camera: ICamera, passEncoder: RenderPassEncoder): void {
+        if (isTimingMode) console.time('WebGPURenderer.renderVolume');
+
+        // Volumes use special blending
+        this.context.state.enableBlend();
+        this.context.state.blendFunc('one', 'one-minus-src-alpha');
+        // Disable depth test as volumes handle it in shader
+        this.context.state.disableDepthTest();
+        this.context.state.depthMask(false);
+
+        for (const renderable of scene.getVolumes()) {
+            this.renderRenderable(renderable, 'color', passEncoder);
+        }
+
+        if (isTimingMode) console.timeEnd('WebGPURenderer.renderVolume');
     }
 
     /**
@@ -462,6 +597,14 @@ export class WebGPURenderer {
      */
     setTransparentBackground(value: boolean): void {
         this.transparentBackground = value;
+    }
+
+    /**
+     * Set occlusion test function for culling.
+     */
+    setOcclusionTest(test: ((sphere: import('../../mol-math/geometry/primitives/sphere3d').Sphere3D) => boolean) | null): void {
+        // Occlusion culling not yet implemented for WebGPU
+        // This would require Hi-Z buffer integration
     }
 
     /**

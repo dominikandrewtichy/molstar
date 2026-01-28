@@ -53,11 +53,11 @@ export class WebGPUScene {
     private transparencyMinDirty = true;
     private hasOpaqueDirty = true;
 
-    private markerAverage = 0;
-    private emissiveAverage = 0;
-    private opacityAverage = 0;
-    private transparencyMin = 0;
-    private hasOpaque = false;
+    private _markerAverage = 0;
+    private _emissiveAverage = 0;
+    private _opacityAverage = 0;
+    private _transparencyMin = 0;
+    private _hasOpaque = false;
 
     private visibleHash = -1;
 
@@ -320,12 +320,19 @@ export class WebGPUScene {
         if (this.markerAverageDirty) {
             this.calculateMarkerAverage();
         }
-        return this.markerAverage;
+        return this._markerAverage;
+    }
+
+    /**
+     * Get marker average as property.
+     */
+    get markerAverage(): number {
+        return this.getMarkerAverage();
     }
 
     private calculateMarkerAverage(): void {
         if (this.primitives.length === 0) {
-            this.markerAverage = 0;
+            this._markerAverage = 0;
         } else {
             let count = 0;
             let sum = 0;
@@ -334,7 +341,7 @@ export class WebGPUScene {
                 sum += r.values.markerAverage?.ref.value || 0;
                 count++;
             }
-            this.markerAverage = count > 0 ? sum / count : 0;
+            this._markerAverage = count > 0 ? sum / count : 0;
         }
         this.markerAverageDirty = false;
     }
@@ -346,12 +353,19 @@ export class WebGPUScene {
         if (this.emissiveAverageDirty) {
             this.calculateEmissiveAverage();
         }
-        return this.emissiveAverage;
+        return this._emissiveAverage;
+    }
+
+    /**
+     * Get emissive average as property.
+     */
+    get emissiveAverage(): number {
+        return this.getEmissiveAverage();
     }
 
     private calculateEmissiveAverage(): void {
         if (this.primitives.length === 0) {
-            this.emissiveAverage = 0;
+            this._emissiveAverage = 0;
         } else {
             let count = 0;
             let sum = 0;
@@ -360,7 +374,7 @@ export class WebGPUScene {
                 sum += (r.values.emissiveAverage?.ref.value || 0) + (r.values.uEmissive?.ref.value || 0);
                 count++;
             }
-            this.emissiveAverage = count > 0 ? sum / count : 0;
+            this._emissiveAverage = count > 0 ? sum / count : 0;
         }
         this.emissiveAverageDirty = false;
     }
@@ -372,12 +386,19 @@ export class WebGPUScene {
         if (this.opacityAverageDirty) {
             this.calculateOpacityAverage();
         }
-        return this.opacityAverage;
+        return this._opacityAverage;
+    }
+
+    /**
+     * Get opacity average as property.
+     */
+    get opacityAverage(): number {
+        return this.getOpacityAverage();
     }
 
     private calculateOpacityAverage(): void {
         if (this.primitives.length === 0) {
-            this.opacityAverage = 0;
+            this._opacityAverage = 0;
         } else {
             let count = 0;
             let sum = 0;
@@ -387,7 +408,7 @@ export class WebGPUScene {
                 sum += alpha;
                 count++;
             }
-            this.opacityAverage = count > 0 ? sum / count : 0;
+            this._opacityAverage = count > 0 ? sum / count : 0;
         }
         this.opacityAverageDirty = false;
     }
@@ -399,12 +420,12 @@ export class WebGPUScene {
         if (this.transparencyMinDirty) {
             this.calculateTransparencyMin();
         }
-        return this.transparencyMin;
+        return this._transparencyMin;
     }
 
     private calculateTransparencyMin(): void {
         if (this.primitives.length === 0) {
-            this.transparencyMin = 1;
+            this._transparencyMin = 1;
         } else {
             let min = 1;
             for (const r of this.primitives) {
@@ -412,7 +433,7 @@ export class WebGPUScene {
                 const alpha = clamp(r.values.alpha?.ref.value * r.state.alphaFactor || 1, 0, 1);
                 if (alpha < 1) min = Math.min(min, alpha);
             }
-            this.transparencyMin = min;
+            this._transparencyMin = min;
         }
         this.transparencyMinDirty = false;
     }
@@ -424,15 +445,22 @@ export class WebGPUScene {
         if (this.hasOpaqueDirty) {
             this.calculateHasOpaque();
         }
-        return this.hasOpaque;
+        return this._hasOpaque;
+    }
+
+    /**
+     * Check if scene has opaque objects as property.
+     */
+    get hasOpaque(): boolean {
+        return this.getHasOpaque();
     }
 
     private calculateHasOpaque(): void {
-        this.hasOpaque = false;
+        this._hasOpaque = false;
         for (const r of this.primitives) {
             if (!r.state.visible) continue;
             if (r.state.opaque) {
-                this.hasOpaque = true;
+                this._hasOpaque = true;
                 break;
             }
         }

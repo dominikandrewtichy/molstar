@@ -245,6 +245,124 @@ fn main(input: FragmentInput) -> FragmentOutput {
 }
 `;
 
+export const mesh_frag_marking_wgsl = /* wgsl */`
+${common_wgsl}
+
+${frame_uniforms_wgsl}
+${material_uniforms_wgsl}
+${object_uniforms_wgsl}
+
+// Fragment input
+struct FragmentInput {
+    @builtin(position) frag_coord: vec4<f32>,
+    @builtin(front_facing) front_facing: bool,
+    @location(0) v_normal: vec3<f32>,
+    @location(1) v_view_position: vec3<f32>,
+    @location(2) v_instance_id: f32,
+    @location(3) v_group: f32,
+}
+
+// Fragment output - marking mask
+struct FragmentOutput {
+    @location(0) mask: vec4<f32>,
+}
+
+@fragment
+fn main(input: FragmentInput) -> FragmentOutput {
+    var output: FragmentOutput;
+
+    // Marking mask output - white for marked objects
+    // The actual marker value determines intensity
+    let marker_intensity = material.marker_average;
+
+    // Only output if there's marking
+    if (marker_intensity > 0.0) {
+        output.mask = vec4<f32>(1.0, 1.0, 1.0, marker_intensity);
+    } else {
+        discard;
+    }
+
+    return output;
+}
+`;
+
+export const mesh_frag_emissive_wgsl = /* wgsl */`
+${common_wgsl}
+
+${frame_uniforms_wgsl}
+${material_uniforms_wgsl}
+
+// Fragment input
+struct FragmentInput {
+    @builtin(position) frag_coord: vec4<f32>,
+    @builtin(front_facing) front_facing: bool,
+    @location(0) v_normal: vec3<f32>,
+    @location(1) v_view_position: vec3<f32>,
+    @location(2) v_instance_id: f32,
+    @location(3) v_group: f32,
+}
+
+// Fragment output - emissive only
+struct FragmentOutput {
+    @location(0) emissive: vec4<f32>,
+}
+
+@fragment
+fn main(input: FragmentInput) -> FragmentOutput {
+    var output: FragmentOutput;
+
+    // Only output emissive color
+    let emissive_intensity = material.emissive;
+    if (emissive_intensity > 0.0) {
+        output.emissive = vec4<f32>(material.color.rgb * emissive_intensity, 1.0);
+    } else {
+        discard;
+    }
+
+    return output;
+}
+`;
+
+export const mesh_frag_tracing_wgsl = /* wgsl */`
+${common_wgsl}
+
+${frame_uniforms_wgsl}
+${light_uniforms_wgsl}
+${material_uniforms_wgsl}
+
+// Fragment input
+struct FragmentInput {
+    @builtin(position) frag_coord: vec4<f32>,
+    @builtin(front_facing) front_facing: bool,
+    @location(0) v_normal: vec3<f32>,
+    @location(1) v_view_position: vec3<f32>,
+    @location(2) v_instance_id: f32,
+    @location(3) v_group: f32,
+}
+
+// Fragment output
+struct FragmentOutput {
+    @location(0) color: vec4<f32>,
+}
+
+@fragment
+fn main(input: FragmentInput) -> FragmentOutput {
+    var output: FragmentOutput;
+
+    // Simple tracing preview - just output base color with normal visualization
+    var normal = normalize(input.v_normal);
+    if (!input.front_facing) {
+        normal = -normal;
+    }
+
+    // Output normal as color for tracing preview
+    let tracing_color = normal * 0.5 + 0.5;
+    output.color = vec4<f32>(tracing_color, material.alpha);
+
+    return output;
+}
+`;
+
 /**
  * Combined mesh shader module for different render variants.
  */
@@ -254,5 +372,8 @@ export const MeshShader = {
         color: mesh_frag_color_wgsl,
         pick: mesh_frag_pick_wgsl,
         depth: mesh_frag_depth_wgsl,
+        marking: mesh_frag_marking_wgsl,
+        emissive: mesh_frag_emissive_wgsl,
+        tracing: mesh_frag_tracing_wgsl,
     },
 };

@@ -205,7 +205,7 @@ function multiplyMatrices(a: Float32Array, b: Float32Array): Float32Array {
     const result = new Float32Array(16);
     for (let i = 0; i < 4; i++) {
         for (let j = 0; j < 4; j++) {
-            result[i * 4 + j] = 
+            result[i * 4 + j] =
                 a[i * 4 + 0] * b[0 * 4 + j] +
                 a[i * 4 + 1] * b[1 * 4 + j] +
                 a[i * 4 + 2] * b[2 * 4 + j] +
@@ -387,11 +387,11 @@ function addCube() {
         1.0,
     ];
     const obj = createSceneObject(state.context, `Cube ${state.objects.length + 1}`, geometry, objectBindGroupLayout, color);
-    
+
     // Random position
     obj.rotationX = Math.random() * Math.PI;
     obj.rotationY = Math.random() * Math.PI;
-    
+
     state.objects.push(obj);
     updateStats();
 }
@@ -409,11 +409,11 @@ function addSphere() {
         1.0,
     ];
     const obj = createSceneObject(state.context, `Sphere ${state.objects.length + 1}`, geometry, objectBindGroupLayout, color);
-    
+
     // Random position
     obj.rotationX = Math.random() * Math.PI;
     obj.rotationY = Math.random() * Math.PI;
-    
+
     state.objects.push(obj);
     updateStats();
 }

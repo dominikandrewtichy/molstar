@@ -4,7 +4,7 @@
  * @author Alexander Rose <alexander.rose@weirdbyte.de>
  */
 
-/// <reference path="./webgpu-types.d.ts" />
+// / <reference path="./webgpu-types.d.ts" />
 
 import { Subject } from 'rxjs';
 import { now } from '../../mol-util/now';

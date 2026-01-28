@@ -102,10 +102,22 @@ export class WebGPUMeshRenderable extends WebGPURenderableBase<WebGPUMeshValues>
         const depthModule = this.context.createShaderModule({
             code: MeshShader.fragment.depth,
         });
+        const markingModule = this.context.createShaderModule({
+            code: MeshShader.fragment.marking,
+        });
+        const emissiveModule = this.context.createShaderModule({
+            code: MeshShader.fragment.emissive,
+        });
+        const tracingModule = this.context.createShaderModule({
+            code: MeshShader.fragment.tracing,
+        });
 
         this.shaderModules.set('color', colorModule);
         this.shaderModules.set('pick', pickModule);
         this.shaderModules.set('depth', depthModule);
+        this.shaderModules.set('marking', markingModule);
+        this.shaderModules.set('emissive', emissiveModule);
+        this.shaderModules.set('tracing', tracingModule);
 
         // Create bind group layouts
         this.createBindGroupLayouts();
@@ -123,6 +135,9 @@ export class WebGPUMeshRenderable extends WebGPURenderableBase<WebGPUMeshValues>
         this.createPipelineForVariant('color', vertexModule, colorModule, pipelineLayout);
         this.createPipelineForVariant('pick', vertexModule, pickModule, pipelineLayout);
         this.createPipelineForVariant('depth', vertexModule, depthModule, pipelineLayout);
+        this.createPipelineForVariant('marking', vertexModule, markingModule, pipelineLayout);
+        this.createPipelineForVariant('emissive', vertexModule, emissiveModule, pipelineLayout);
+        this.createPipelineForVariant('tracing', vertexModule, tracingModule, pipelineLayout);
     }
 
     private createBindGroupLayouts(): void {
@@ -236,6 +251,12 @@ export class WebGPUMeshRenderable extends WebGPURenderableBase<WebGPUMeshValues>
                 ];
             case 'depth':
                 return [{ format: 'rgba8unorm' as TextureFormat }];
+            case 'marking':
+                return [{ format: 'rgba8unorm' as TextureFormat }];
+            case 'emissive':
+                return [{ format: 'rgba8unorm' as TextureFormat }];
+            case 'tracing':
+                return [{ format: 'bgra8unorm' as TextureFormat }];
             default:
                 return [{ format: 'bgra8unorm' as TextureFormat }];
         }
@@ -416,9 +437,9 @@ export function createWebGPUMeshRenderable(
             color: MeshShader.fragment.color,
             pick: MeshShader.fragment.pick,
             depth: MeshShader.fragment.depth,
-            marking: MeshShader.fragment.color, // Use color for now
-            emissive: MeshShader.fragment.color,
-            tracing: MeshShader.fragment.color,
+            marking: MeshShader.fragment.marking,
+            emissive: MeshShader.fragment.emissive,
+            tracing: MeshShader.fragment.tracing,
         },
         vertexBufferLayouts: [],
         bindGroupLayouts: [],

@@ -22,3 +22,14 @@ export * from './picking';
 export * from './passes';
 export * from './compute';
 export * from './testing';
+
+// WebGPU MultiSample exports
+export {
+    WebGPUMultiSamplePass,
+    WebGPUMultiSampleHelper,
+    WebGPUMultiSampleParams,
+    WebGPUJitterVectors,
+} from './passes';
+export type {
+    WebGPUMultiSampleProps,
+} from './passes';

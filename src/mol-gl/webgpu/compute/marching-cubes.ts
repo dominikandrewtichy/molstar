@@ -732,10 +732,10 @@ function getTriIndicesData(): Uint8Array {
             const idx = (i * 16 + j) * 4;
             if (j < TriTable[i].length) {
                 // Store edge index in alpha channel (compatible with WGSL shader)
-                data[idx + 0] = 0;                  // R
-                data[idx + 1] = 0;                  // G
-                data[idx + 2] = 0;                  // B
-                data[idx + 3] = TriTable[i][j];    // A - edge index
+                data[idx + 0] = 0; // R
+                data[idx + 1] = 0; // G
+                data[idx + 2] = 0; // B
+                data[idx + 3] = TriTable[i][j]; // A - edge index
             } else {
                 // No triangle - mark with 255
                 data[idx + 0] = 0;

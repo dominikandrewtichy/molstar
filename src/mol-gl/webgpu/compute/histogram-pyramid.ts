@@ -221,9 +221,9 @@ export class WebGPUHistogramPyramid {
             // Update uniforms
             const uniformData = new Float32Array([
                 Math.pow(2, i + 1) / maxSize, // size
-                size,                          // texSize
-                i === 0 ? 1 : 0,              // first
-                0,                             // padding
+                size, // texSize
+                i === 0 ? 1 : 0, // first
+                0, // padding
             ]);
             this.uniformBuffer!.write(uniformData);
 
