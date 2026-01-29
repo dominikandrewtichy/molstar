@@ -406,6 +406,7 @@ namespace InputObserver {
         let hasMoved = false;
 
         let resizeObserver: ResizeObserver | undefined;
+        let usingWindowResizeFallback = false;
         if (typeof window.ResizeObserver !== 'undefined') {
             resizeObserver = new window.ResizeObserver(onResize);
         }
@@ -444,8 +445,15 @@ namespace InputObserver {
             document.addEventListener('pointerlockerror', onPointerLockError, false);
 
             if (resizeObserver != null) {
-                resizeObserver.observe(element.parentElement!);
+                if (element.parentElement) {
+                    resizeObserver.observe(element.parentElement);
+                } else {
+                    // Fallback to window resize when element has no parent yet
+                    usingWindowResizeFallback = true;
+                    window.addEventListener('resize', onResize, false);
+                }
             } else {
+                usingWindowResizeFallback = true;
                 window.addEventListener('resize', onResize, false);
             }
         }
@@ -480,9 +488,12 @@ namespace InputObserver {
             cross.remove();
 
             if (resizeObserver != null) {
-                resizeObserver.unobserve(element.parentElement!);
+                if (element.parentElement) {
+                    resizeObserver.unobserve(element.parentElement);
+                }
                 resizeObserver.disconnect();
-            } else {
+            }
+            if (usingWindowResizeFallback || resizeObserver == null) {
                 window.removeEventListener('resize', onResize, false);
             }
         }
